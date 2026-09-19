@@ -1,5 +1,6 @@
-import { Tray, Menu, nativeImage, BrowserWindow, app } from 'electron';
+import { Tray, Menu, nativeImage, NativeImage, BrowserWindow, app } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { Database } from '../db/Database';
 import { SingBoxManager } from '../core/SingBoxManager';
 import { SystemProxy } from '../system/SystemProxy';
@@ -19,12 +20,38 @@ export class TrayManager {
     return TrayManager.instance;
   }
 
+  private getTrayIcon(): NativeImage {
+    const candidates = [
+      path.join(process.resourcesPath || '', 'bin', 'tray-icon.png'),
+      path.join(process.resourcesPath || '', 'bin', 'icon.ico'),
+      path.join(path.dirname(process.execPath || ''), 'resources', 'bin', 'tray-icon.png'),
+      path.join(path.dirname(process.execPath || ''), 'resources', 'bin', 'icon.ico'),
+      path.join(__dirname, '../../build/tray-icon.png'),
+      path.join(__dirname, '../../build/icon.ico'),
+      path.join(__dirname, '../../bin/tray-icon.png'),
+      path.join(process.cwd(), 'bin', 'tray-icon.png'),
+      path.join(process.cwd(), 'build', 'tray-icon.png'),
+      path.join(__dirname, '../renderer/assets/tray-icon.png'),
+    ];
+
+    for (const p of candidates) {
+      if (p && fs.existsSync(p)) {
+        try {
+          const img = nativeImage.createFromPath(p);
+          if (!img.isEmpty()) {
+            return img.resize({ width: 16, height: 16 });
+          }
+        } catch {}
+      }
+    }
+
+    return nativeImage.createEmpty();
+  }
+
   public init(window: BrowserWindow): void {
     this.mainWindow = window;
 
-    const iconPath = path.join(__dirname, '../../src/renderer/assets/tray-icon.png');
-    const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
-
+    const icon = this.getTrayIcon();
     this.tray = new Tray(icon);
     this.tray.setToolTip('OwnBox - 未连接');
 

@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import http from 'http';
 import { Database } from './db/Database';
 import { SingBoxManager } from './core/SingBoxManager';
@@ -21,8 +22,22 @@ let startTime: number = 0;
 let totalRx: number = 0;
 let totalTx: number = 0;
 
+function getWindowIcon(): string {
+  const candidates = [
+    path.join(process.resourcesPath || '', 'bin', 'icon.ico'),
+    path.join(path.dirname(process.execPath || ''), 'resources', 'bin', 'icon.ico'),
+    path.join(__dirname, '../../build/icon.ico'),
+    path.join(process.cwd(), 'build', 'icon.ico'),
+    path.join(process.cwd(), 'bin', 'icon.ico'),
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  return path.join(process.cwd(), 'build', 'icon.ico');
+}
+
 function createWindow(): void {
-  const iconPath = path.join(__dirname, '../../build/icon.ico');
+  const iconPath = getWindowIcon();
 
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -39,6 +54,21 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  // Open any external http(s) links in default browser
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -182,6 +212,13 @@ ipcMain.on('window:maximize', () => {
 });
 ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized() || false);
+ipcMain.handle('system:openExternal', (_, url: string) => {
+  if (url && (url.startsWith('http:') || url.startsWith('https:'))) {
+    shell.openExternal(url);
+    return true;
+  }
+  return false;
+});
 
 // Core
 ipcMain.handle('core:start', async () => handleCoreStart());

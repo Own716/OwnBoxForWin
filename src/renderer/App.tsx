@@ -267,6 +267,7 @@ export const App: React.FC = () => {
                 activeNodeId={activeNodeId}
                 onSelectNode={handleSelectNode}
                 onSaveNodes={handleSaveNodes}
+                subscriptions={subscriptions}
               />
             )}
 

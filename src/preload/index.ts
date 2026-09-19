@@ -94,6 +94,11 @@ export const api = {
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
     save: (settings: Partial<AppSettings>) => ipcRenderer.invoke('settings:save', settings),
   },
+
+  // System
+  system: {
+    openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('system:openExternal', url),
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);
