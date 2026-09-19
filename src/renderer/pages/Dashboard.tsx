@@ -146,21 +146,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
               className="flex items-center space-x-3 p-2.5 -ml-2.5 rounded-xl hover:bg-slate-100/80 dark:hover:bg-slate-800/80 cursor-pointer transition-colors w-fit"
               title="点击快速切换节点"
             >
-              <div className="w-10 h-10 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs uppercase">
+              <div className="h-9 px-2.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs uppercase shrink-0">
                 {activeNode?.type || 'PROXY'}
               </div>
               <div>
                 <div className="flex items-center space-x-2">
                   <h3 className="font-bold text-base text-slate-900 dark:text-slate-100">
-                    {activeNode?.name || '请选择节点'}
+                    {activeNode?.name || (nodes.length === 0 ? '暂无节点，请先导入订阅' : '请选择节点')}
                   </h3>
                   <ChevronRight className="w-4 h-4 text-slate-400" />
                 </div>
                 <div className="flex items-center space-x-3 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  <span>{activeNode?.server}:{activeNode?.port}</span>
-                  {activeNode?.ping !== undefined && activeNode.ping > 0 && (
-                    <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                      {activeNode.ping} ms
+                  {activeNode ? (
+                    <>
+                      <span>{activeNode.server}:{activeNode.port}</span>
+                      {activeNode.ping !== undefined && activeNode.ping > 0 && (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                          {activeNode.ping} ms
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span
+                      className="text-blue-500 hover:underline cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onNavigate('subscriptions');
+                      }}
+                    >
+                      前往订阅管理导入节点 →
                     </span>
                   )}
                 </div>

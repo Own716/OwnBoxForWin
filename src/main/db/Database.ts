@@ -119,70 +119,9 @@ export class Database {
       { id: 'app-steam', name: 'Steam Client', exePath: 'steam.exe', action: 'direct', enabled: true },
     ];
 
-    // Default Sample Nodes
-    this.nodes = [
-      {
-        id: 'node-jp-01',
-        name: 'Japan Tokyo 01 (VLESS Reality)',
-        type: 'vless',
-        server: 'jp01.ownbox.org',
-        port: 443,
-        uuid: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
-        flow: 'xtls-rprx-vision',
-        tls: true,
-        reality: true,
-        sni: 'www.microsoft.com',
-        publicKey: '6x2i9Gv3TqL7R0P2y4K1jB5mN8wXzVqL9c7A4dF2hS0',
-        shortId: '0123456789abcdef',
-        fingerprint: 'chrome',
-        groupId: 'default',
-        ping: 48,
-      },
-      {
-        id: 'node-hk-01',
-        name: 'Hong Kong 01 (Hysteria 2)',
-        type: 'hysteria2',
-        server: 'hk01.ownbox.org',
-        port: 8443,
-        password: 'ownbox-super-password',
-        tls: true,
-        sni: 'hk01.ownbox.org',
-        groupId: 'default',
-        ping: 32,
-        upMbps: 100,
-        downMbps: 500,
-      },
-      {
-        id: 'node-us-01',
-        name: 'US Silicon Valley (VMess WS)',
-        type: 'vmess',
-        server: 'us01.ownbox.org',
-        port: 443,
-        uuid: 'b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e',
-        alterId: 0,
-        method: 'auto',
-        tls: true,
-        sni: 'us01.ownbox.org',
-        transport: 'ws',
-        transportPath: '/vmess-ws',
-        groupId: 'default',
-        ping: 145,
-      },
-      {
-        id: 'node-sg-01',
-        name: 'Singapore 01 (Trojan TLS)',
-        type: 'trojan',
-        server: 'sg01.ownbox.org',
-        port: 443,
-        password: 'trojan-secret-pass',
-        tls: true,
-        sni: 'sg01.ownbox.org',
-        groupId: 'default',
-        ping: 65,
-      },
-    ];
-
-    this.activeNodeId = this.nodes[0].id;
+    // Initialize empty node list (no fake mock nodes)
+    this.nodes = [];
+    this.activeNodeId = '';
 
     this.load();
   }
@@ -199,7 +138,9 @@ export class Database {
       if (fs.existsSync(this.dbPath)) {
         const raw = fs.readFileSync(this.dbPath, 'utf8');
         const data = JSON.parse(raw);
-        if (data.nodes) this.nodes = data.nodes;
+        if (data.nodes) {
+          this.nodes = (data.nodes as ProxyNode[]).filter((n) => !n.server || !n.server.includes('ownbox.org'));
+        }
         if (data.subscriptions) this.subscriptions = data.subscriptions;
         if (data.rules) this.rules = data.rules;
         if (data.appRules) this.appRules = data.appRules;

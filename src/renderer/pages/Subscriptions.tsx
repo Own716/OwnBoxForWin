@@ -41,13 +41,16 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({
     setUpdatingId(id);
     try {
       const success = await window.electronAPI.subscriptions.update(id);
+      const all = await window.electronAPI.subscriptions.getAll();
+      onSaveSubscriptions(all);
       if (success) {
         onRefreshNodes();
-        const all = await window.electronAPI.subscriptions.getAll();
-        onSaveSubscriptions(all);
       } else {
-        alert('更新订阅失败，请检查链接是否有效');
+        const failedSub = all.find((s) => s.id === id);
+        alert(failedSub?.errorMessage ? `订阅更新失败: ${failedSub.errorMessage}` : '更新订阅失败，请检查链接是否有效');
       }
+    } catch (e: any) {
+      alert(`更新订阅出错: ${e.message}`);
     } finally {
       setUpdatingId(null);
     }
@@ -81,6 +84,9 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({
         status: 'idle',
       };
       onSaveSubscriptions([...subscriptions, newSub]);
+      setTimeout(() => {
+        handleUpdate(newSub.id);
+      }, 150);
     }
 
     setIsAdding(false);
@@ -176,6 +182,13 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({
                   <p className="text-[11px] font-mono text-slate-400 bg-slate-50 dark:bg-slate-800/40 p-2 rounded-lg mt-3 truncate">
                     {sub.url}
                   </p>
+
+                  {sub.status === 'error' && sub.errorMessage && (
+                    <p className="text-[11px] text-red-500 bg-red-500/10 p-2 rounded-lg mt-2 flex items-center space-x-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{sub.errorMessage}</span>
+                    </p>
+                  )}
                 </div>
 
                 {/* Footer Controls */}

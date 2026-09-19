@@ -10,6 +10,8 @@ import { TcpPing } from './net/TcpPing';
 import { SpeedTestRunner } from './net/SpeedTestRunner';
 import { WebDAVClient } from './net/WebDAVClient';
 import { BackupMigrator } from './db/BackupMigrator';
+import { SubscriptionFetcher } from './net/SubscriptionFetcher';
+import { UniversalSubscriptionParser } from './net/UniversalSubscriptionParser';
 import { TrayManager } from './tray/TrayManager';
 import { TrafficStats } from '../types';
 
@@ -247,31 +249,33 @@ ipcMain.handle('subs:update', async (_, id) => {
   if (!target || !target.url) return false;
 
   try {
-    const parsedUrl = new URL(target.url);
-    const client = parsedUrl.protocol === 'https:' ? require('https') : require('http');
-    const content: string = await new Promise((resolve, reject) => {
-      client.get(target.url, (res: any) => {
-        let d = '';
-        res.on('data', (c: any) => (d += c));
-        res.on('end', () => resolve(d));
-      }).on('error', reject);
-    });
+    target.status = 'updating';
+    db.saveSubscriptions(subs);
 
-    const newNodes = BackupMigrator.parseNodeLinks(content);
+    const settings = db.getSettings();
+    const result = await SubscriptionFetcher.fetch(target.url, settings.mixedPort);
+    const newNodes = UniversalSubscriptionParser.parse(result.content);
+
     if (newNodes.length > 0) {
       newNodes.forEach((n) => (n.groupId = target.id));
       const otherNodes = db.getNodes().filter((n) => n.groupId !== target.id);
       db.saveNodes([...otherNodes, ...newNodes]);
+
       target.nodeCount = newNodes.length;
       target.lastUpdate = Date.now();
       target.status = 'success';
+      target.errorMessage = undefined;
       db.saveSubscriptions(subs);
       return true;
+    } else {
+      target.status = 'error';
+      target.errorMessage = '未能从订阅源解析出有效节点';
+      db.saveSubscriptions(subs);
+      return false;
     }
-    return false;
   } catch (e: any) {
     target.status = 'error';
-    target.errorMessage = e.message;
+    target.errorMessage = e.message || '更新订阅失败';
     db.saveSubscriptions(subs);
     return false;
   }
@@ -381,6 +385,45 @@ ipcMain.handle('settings:get', () => Database.getInstance().getSettings());
 ipcMain.handle('settings:save', async (_, s) => {
   const db = Database.getInstance();
   db.saveSettings(s);
+  const currentSettings = db.getSettings();
+
+  // 1. Windows Startup
+  if (s.startOnBoot !== undefined) {
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: !!s.startOnBoot,
+        path: process.execPath,
+      });
+    } catch (e) {
+      console.warn('Failed to set login item settings:', e);
+    }
+  }
+
+  // 2. System Proxy sync
+  const core = SingBoxManager.getInstance();
+  if (s.systemProxyEnabled !== undefined || s.mixedPort !== undefined || s.systemProxyBypassLan !== undefined) {
+    if (currentSettings.systemProxyEnabled && core.getState() === 'running') {
+      await SystemProxy.enable('127.0.0.1', currentSettings.mixedPort, currentSettings.systemProxyBypassLan);
+    } else if (!currentSettings.systemProxyEnabled) {
+      await SystemProxy.disable();
+    }
+  }
+
+  // 3. Core dynamic reload if running
+  if (core.getState() === 'running') {
+    if (
+      s.mixedPort !== undefined ||
+      s.tunEnabled !== undefined ||
+      s.tunMtu !== undefined ||
+      s.routingMode !== undefined ||
+      s.allowLan !== undefined ||
+      s.clashApiPort !== undefined ||
+      s.logLevel !== undefined
+    ) {
+      await handleCoreStart();
+    }
+  }
+
   TrayManager.getInstance().updateMenu();
   return true;
 });

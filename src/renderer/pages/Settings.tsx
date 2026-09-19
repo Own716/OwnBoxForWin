@@ -231,12 +231,20 @@ export const Settings: React.FC<SettingsProps> = ({
         {/* 4. Core Category */}
         {activeCategory === 'core' && (
           <div className="space-y-4 divide-y divide-slate-100 dark:divide-slate-800/60">
-            <div className="flex items-center justify-between pb-3">
+            <div className="flex items-start justify-between pb-3">
               <div>
-                <h4 className="font-semibold text-slate-800 dark:text-slate-200">Sing-box 官方核心版本</h4>
-                <p className="text-[11px] text-slate-400">官方发布原生集成：{coreVersion}</p>
+                <h4 className="font-semibold text-slate-800 dark:text-slate-200 flex items-center space-x-2">
+                  <span>Sing-box 官方核心版本</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-600 font-medium">原生真内核</span>
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-1">官方发布原生集成：{coreVersion}</p>
+                <div className="mt-2 space-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  <p>• 编译环境：<span className="font-mono text-slate-600 dark:text-slate-300">Go 1.25.13 (windows/amd64)</span></p>
+                  <p>• 内置特性标签：<span className="font-mono text-slate-600 dark:text-slate-300">with_gvisor, with_quic, with_wireguard, with_utls, with_clash_api</span></p>
+                  <p>• 驱动支持：<span className="font-mono text-slate-600 dark:text-slate-300">Wintun 0.14.1 (高性能虚拟网卡驱动)</span></p>
+                </div>
               </div>
-              <span className="px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 font-mono font-medium">
+              <span className="px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 font-mono font-medium text-xs">
                 {coreVersion}
               </span>
             </div>

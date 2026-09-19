@@ -20,11 +20,24 @@ export class SingBoxManager extends EventEmitter {
     }
 
     this.configPath = path.join(ownBoxDir, 'config.json');
+    this.binaryPath = this.locateBinary();
+  }
 
-    // Locate sing-box.exe
-    const devBin = path.join(process.cwd(), 'bin', 'sing-box.exe');
-    const prodBin = path.join(process.resourcesPath || '', 'bin', 'sing-box.exe');
-    this.binaryPath = fs.existsSync(prodBin) ? prodBin : devBin;
+  private locateBinary(): string {
+    const candidates = [
+      path.join(process.resourcesPath || '', 'bin', 'sing-box.exe'),
+      path.join(path.dirname(process.execPath || ''), 'resources', 'bin', 'sing-box.exe'),
+      path.join(path.dirname(process.execPath || ''), 'bin', 'sing-box.exe'),
+      path.join(__dirname, '../../bin/sing-box.exe'),
+      path.join(process.cwd(), 'bin', 'sing-box.exe'),
+    ];
+
+    for (const p of candidates) {
+      if (p && fs.existsSync(p)) {
+        return p;
+      }
+    }
+    return path.join(process.cwd(), 'bin', 'sing-box.exe');
   }
 
   public static getInstance(): SingBoxManager {
@@ -50,11 +63,11 @@ export class SingBoxManager extends EventEmitter {
         proc.stdout?.on('data', (d) => (output += d.toString()));
         proc.on('close', () => {
           const match = output.match(/sing-box version ([^\s\n]+)/i);
-          resolve(match ? match[1] : '1.15.0');
+          resolve(match ? match[1] : '1.15.0-alpha.6');
         });
-        proc.on('error', () => resolve('1.15.0'));
+        proc.on('error', () => resolve('1.15.0-alpha.6'));
       } catch {
-        resolve('1.15.0');
+        resolve('1.15.0-alpha.6');
       }
     });
   }

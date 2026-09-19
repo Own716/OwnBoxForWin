@@ -25,7 +25,7 @@ import {
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
   const [coreState, setCoreState] = useState<string>('stopped');
-  const [coreVersion, setCoreVersion] = useState<string>('1.15.0');
+  const [coreVersion, setCoreVersion] = useState<string>('1.15.0-alpha.6');
   const [nodes, setNodes] = useState<ProxyNode[]>([]);
   const [activeNodeId, setActiveNodeId] = useState<string>('');
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
