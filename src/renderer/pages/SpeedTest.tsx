@@ -36,7 +36,8 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({
 }) => {
   const [testMode, setTestMode] = useState<'ping' | 'latency' | 'download' | 'full'>('ping');
   const [isRunning, setIsRunning] = useState(false);
-  const [testRows, setTestRows] = useState<TestRow[]>(
+  const stopRequestedRef = React.useRef(false);
+  const [testRows, setTestRows] = useState<TestRow[]>(() =>
     nodes.map((n) => ({
       node: n,
       tcpPing: n.ping && n.ping > 0 ? n.ping : undefined,
@@ -45,48 +46,81 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({
   );
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Sync testRows when nodes list changes
+  React.useEffect(() => {
+    setTestRows((prev) =>
+      nodes.map((n) => {
+        const existing = prev.find((r) => r.node.id === n.id);
+        return {
+          node: n,
+          tcpPing: existing?.tcpPing ?? (n.ping && n.ping > 0 ? n.ping : undefined),
+          httpLatency: existing?.httpLatency,
+          downloadSpeed: existing?.downloadSpeed,
+          status: existing?.status || 'idle',
+        };
+      })
+    );
+  }, [nodes]);
+
   const handleStartTest = async () => {
     if (!window.electronAPI || isRunning) return;
     setIsRunning(true);
+    stopRequestedRef.current = false;
 
-    const updatedRows = [...testRows];
+    const currentRows = [...testRows];
 
-    for (let i = 0; i < updatedRows.length; i++) {
-      if (!isRunning && i > 0 && !isRunning) break;
+    for (let i = 0; i < currentRows.length; i++) {
+      if (stopRequestedRef.current) break;
 
-      updatedRows[i].status = 'testing';
-      setTestRows([...updatedRows]);
+      currentRows[i] = { ...currentRows[i], status: 'testing' };
+      setTestRows([...currentRows]);
 
       try {
-        const item = updatedRows[i].node;
+        const item = currentRows[i].node;
 
         // 1. TCP Ping test
         const pingRes = await window.electronAPI.nodes.ping(item.server, item.port);
-        updatedRows[i].tcpPing = pingRes.time;
+        currentRows[i].tcpPing = pingRes.time;
 
         // 2. Latency test if requested
         if (testMode === 'latency' || testMode === 'full') {
-          const lat = await window.electronAPI.speedTest.testLatency();
-          updatedRows[i].httpLatency = lat > 0 ? lat : undefined;
+          const lat = await window.electronAPI.speedTest.testLatency(undefined, item.id);
+          currentRows[i].httpLatency = lat > 0 ? lat : undefined;
         }
 
         // 3. Download speed test if requested
         if (testMode === 'download' || testMode === 'full') {
           const speed = await window.electronAPI.speedTest.testDownload();
-          updatedRows[i].downloadSpeed = speed;
+          currentRows[i].downloadSpeed = speed > 0 ? speed : undefined;
         }
 
-        updatedRows[i].status = pingRes.time > 0 ? 'success' : 'timeout';
+        // Accurate status calculation
+        let isSuccess = false;
+        if (testMode === 'ping') {
+          isSuccess = Boolean(currentRows[i].tcpPing && currentRows[i].tcpPing! > 0);
+        } else if (testMode === 'latency') {
+          isSuccess = Boolean(currentRows[i].httpLatency && currentRows[i].httpLatency! > 0);
+        } else if (testMode === 'download') {
+          isSuccess = Boolean(currentRows[i].downloadSpeed && currentRows[i].downloadSpeed! > 0);
+        } else {
+          isSuccess = Boolean(
+            (currentRows[i].tcpPing && currentRows[i].tcpPing! > 0) ||
+            (currentRows[i].httpLatency && currentRows[i].httpLatency! > 0) ||
+            (currentRows[i].downloadSpeed && currentRows[i].downloadSpeed! > 0)
+          );
+        }
+
+        currentRows[i].status = isSuccess ? 'success' : 'timeout';
       } catch {
-        updatedRows[i].status = 'error';
+        currentRows[i].status = 'error';
       }
 
-      setTestRows([...updatedRows]);
+      setTestRows([...currentRows]);
     }
 
     // Save back updated ping to nodes database
     const savedNodes = nodes.map((n) => {
-      const match = updatedRows.find((r) => r.node.id === n.id);
+      const match = currentRows.find((r) => r.node.id === n.id);
       return match && match.tcpPing !== undefined ? { ...n, ping: match.tcpPing } : n;
     });
     onSaveNodes(savedNodes);
@@ -95,14 +129,17 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({
   };
 
   const handleStopTest = () => {
+    stopRequestedRef.current = true;
     setIsRunning(false);
     window.electronAPI?.speedTest.cancel();
   };
 
   const formatSpeed = (bps?: number): string => {
     if (!bps || bps <= 0) return '-';
-    const mbps = bps / (1024 * 1024);
-    return `${mbps.toFixed(1)} Mbps`;
+    const mbps = bps / 1000000;
+    if (mbps >= 1) return `${mbps.toFixed(1)} Mbps`;
+    const kbps = bps / 1000;
+    return `${kbps.toFixed(0)} Kbps`;
   };
 
   const filteredRows = testRows.filter(

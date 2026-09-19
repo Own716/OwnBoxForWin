@@ -17,9 +17,11 @@ import {
   CheckCircle2,
   Radio,
   ExternalLink,
+  Activity,
 } from 'lucide-react';
 import { ProxyNode, Subscription } from '../../types';
 import { NodeEditorModal } from './NodeEditorModal';
+import { SingleNodeSpeedModal } from './SingleNodeSpeedModal';
 
 interface NodesProps {
   nodes: ProxyNode[];
@@ -108,6 +110,7 @@ export const Nodes: React.FC<NodesProps> = ({
   const [importText, setImportText] = useState('');
   const [isPinging, setIsPinging] = useState(false);
   const [copiedNodeId, setCopiedNodeId] = useState<string | null>(null);
+  const [speedTestingNode, setSpeedTestingNode] = useState<ProxyNode | null>(null);
 
   const sortDropdownRef = useRef<HTMLDivElement | null>(null);
 
@@ -544,7 +547,10 @@ export const Nodes: React.FC<NodesProps> = ({
                   <div className="flex items-center space-x-2">
                     {/* Ping button / badge */}
                     <button
-                      onClick={(e) => handlePingNode(node, e)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSpeedTestingNode(node);
+                      }}
                       className={`text-[10px] font-medium px-2 py-0.5 rounded-full flex items-center space-x-1 transition-colors ${
                         hasPing
                           ? node.ping! < 250
@@ -556,7 +562,7 @@ export const Nodes: React.FC<NodesProps> = ({
                           ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-semibold'
                           : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                       }`}
-                      title="点击单节点测速"
+                      title="点击进行单节点专项测速"
                     >
                       <Zap className="w-2.5 h-2.5" />
                       <span>{hasPing ? `${node.ping} ms` : isTimeout ? '超时' : '测速'}</span>
@@ -570,8 +576,18 @@ export const Nodes: React.FC<NodesProps> = ({
                     )}
                   </div>
 
-                  {/* Action buttons (Copy link, Edit, Delete) */}
+                  {/* Action buttons (Single Node Speed Test, Copy link, Edit, Delete) */}
                   <div className="flex items-center space-x-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSpeedTestingNode(node);
+                      }}
+                      className="p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                      title="单节点专项测速 (TCP延迟 / HTTP真实时延 / 带宽吞吐)"
+                    >
+                      <Activity className="w-3.5 h-3.5" />
+                    </button>
                     <button
                       onClick={(e) => handleCopyLink(node, e)}
                       className="p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -689,6 +705,20 @@ export const Nodes: React.FC<NodesProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Single Node Speed Modal */}
+      {speedTestingNode && (
+        <SingleNodeSpeedModal
+          node={speedTestingNode}
+          isActive={speedTestingNode.id === activeNodeId}
+          onSelectNode={onSelectNode}
+          onSaveNodePing={(nodeId, ping) => {
+            const updated = nodes.map((n) => (n.id === nodeId ? { ...n, ping } : n));
+            onSaveNodes(updated);
+          }}
+          onClose={() => setSpeedTestingNode(null)}
+        />
       )}
     </div>
   );

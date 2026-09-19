@@ -37,13 +37,32 @@ export const Logs: React.FC = () => {
 
   useEffect(() => {
     if (!window.electronAPI) return;
+
+    // Load full historical logs immediately upon opening page
+    if (window.electronAPI.logs?.getAll) {
+      window.electronAPI.logs.getAll().then((saved) => {
+        if (saved && saved.length > 0) {
+          setLogs(saved);
+        }
+      }).catch(() => {});
+    }
+
+    // Subscribe to live log streaming
     const unsub = window.electronAPI.core.onLog((entry: LogEntry) => {
-      setLogs((prev) => [...prev.slice(-499), entry]); // keep last 500 lines
+      setLogs((prev) => [...prev.slice(-999), entry]); // keep last 1000 lines
     });
+
     return () => {
       unsub();
     };
   }, []);
+
+  const handleClear = async () => {
+    setLogs([]);
+    if (window.electronAPI?.logs?.clear) {
+      await window.electronAPI.logs.clear();
+    }
+  };
 
   useEffect(() => {
     if (!isPaused) {
@@ -138,7 +157,7 @@ export const Logs: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setLogs([])}
+            onClick={handleClear}
             className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-red-500 transition-colors"
             title="清空当前日志"
           >

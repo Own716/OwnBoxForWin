@@ -2,7 +2,8 @@ import { spawn, ChildProcess, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { EventEmitter } from 'events';
-import { CoreState } from '../../types';
+import { CoreState, LogEntry } from '../../types';
+import { LogManager } from '../log/LogManager';
 
 export function isRunningAsAdmin(): boolean {
   if (process.platform !== 'win32') return true;
@@ -20,6 +21,18 @@ export class SingBoxManager extends EventEmitter {
   private state: CoreState = 'stopped';
   private configPath: string;
   private binaryPath: string;
+
+  private log(level: 'info' | 'warn' | 'error' | 'debug', message: string, source: 'core' | 'app' | 'system' = 'core') {
+    const entry: LogEntry = {
+      id: Math.random().toString(36).substring(2),
+      timestamp: new Date().toLocaleTimeString(),
+      level,
+      message,
+      source,
+    };
+    this.emit('log', entry);
+    LogManager.getInstance().addLog(level, message, source);
+  }
 
   private constructor() {
     super();
@@ -135,26 +148,18 @@ export class SingBoxManager extends EventEmitter {
         const hasTun = config.inbounds.some((i: any) => i.type === 'tun');
         if (hasTun) {
           config.inbounds = config.inbounds.filter((i: any) => i.type !== 'tun');
-          this.emit('log', {
-            id: Math.random().toString(36).substring(2),
-            timestamp: new Date().toLocaleTimeString(),
-            level: 'warn',
-            message: '【权限保护】检测到当前以普通用户权限运行，已安全回退为系统代理模式（可在设置中以管理员身份重启启用 TUN 全局网卡）。',
-            source: 'system',
-          });
+          this.log(
+            'warn',
+            '【权限保护】检测到当前以普通用户权限运行，已安全回退为系统代理模式（可在设置中以管理员身份重启启用 TUN 全局网卡）。',
+            'system'
+          );
         }
       }
 
       // Check config syntax before launching
       const validation = await this.validate(config);
       if (!validation.valid) {
-        this.emit('log', {
-          id: Math.random().toString(36).substring(2),
-          timestamp: new Date().toLocaleTimeString(),
-          level: 'error',
-          message: `配置校验失败: ${validation.error}`,
-          source: 'core',
-        });
+        this.log('error', `配置校验失败: ${validation.error}`, 'core');
         this.setState('error');
         return false;
       }
@@ -162,6 +167,8 @@ export class SingBoxManager extends EventEmitter {
       fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf8');
 
       const workingDir = path.dirname(this.binaryPath);
+      this.log('info', `正在拉起核心引擎进程: ${this.binaryPath}`, 'core');
+
       this.process = spawn(this.binaryPath, ['run', '-c', this.configPath], {
         cwd: workingDir,
         windowsHide: true,
@@ -171,13 +178,11 @@ export class SingBoxManager extends EventEmitter {
         const lines = data.toString().split('\n');
         for (const line of lines) {
           if (line.trim()) {
-            this.emit('log', {
-              id: Math.random().toString(36).substring(2),
-              timestamp: new Date().toLocaleTimeString(),
-              level: line.toLowerCase().includes('error') ? 'error' : 'info',
-              message: line.trim(),
-              source: 'core',
-            });
+            this.log(
+              line.toLowerCase().includes('error') ? 'error' : 'info',
+              line.trim(),
+              'core'
+            );
           }
         }
       });
@@ -193,36 +198,22 @@ export class SingBoxManager extends EventEmitter {
             } else if (/\b(warn|warning)\b/i.test(trimmed)) {
               level = 'warn';
             }
-            this.emit('log', {
-              id: Math.random().toString(36).substring(2),
-              timestamp: new Date().toLocaleTimeString(),
-              level,
-              message: trimmed,
-              source: 'core',
-            });
+            this.log(level, trimmed, 'core');
           }
         }
       });
 
       this.process.on('error', (err) => {
-        this.emit('log', {
-          id: Math.random().toString(36).substring(2),
-          timestamp: new Date().toLocaleTimeString(),
-          level: 'error',
-          message: `内核启动失败: ${err.message}`,
-          source: 'core',
-        });
+        this.log('error', `内核启动失败: ${err.message}`, 'core');
         this.setState('error');
       });
 
       this.process.on('close', (code) => {
-        this.emit('log', {
-          id: Math.random().toString(36).substring(2),
-          timestamp: new Date().toLocaleTimeString(),
-          level: code === 0 ? 'info' : 'warn',
-          message: `Sing-box 核心进程已停止 (退出码: ${code})`,
-          source: 'core',
-        });
+        this.log(
+          code === 0 ? 'info' : 'warn',
+          `Sing-box 核心进程已停止 (退出码: ${code})`,
+          'core'
+        );
         this.process = null;
         if (this.state !== 'stopping') {
           this.setState('stopped');
@@ -234,26 +225,14 @@ export class SingBoxManager extends EventEmitter {
 
       if (this.process && !this.process.killed) {
         this.setState('running');
-        this.emit('log', {
-          id: Math.random().toString(36).substring(2),
-          timestamp: new Date().toLocaleTimeString(),
-          level: 'info',
-          message: `OwnBox 核心引擎启动成功 (PID: ${this.process.pid})`,
-          source: 'core',
-        });
+        this.log('info', `OwnBox 核心引擎启动成功 (PID: ${this.process.pid})`, 'core');
         return true;
       } else {
         this.setState('error');
         return false;
       }
     } catch (e: any) {
-      this.emit('log', {
-        id: Math.random().toString(36).substring(2),
-        timestamp: new Date().toLocaleTimeString(),
-        level: 'error',
-        message: `启动异常: ${e.message}`,
-        source: 'core',
-      });
+      this.log('error', `启动异常: ${e.message}`, 'core');
       this.setState('error');
       return false;
     }

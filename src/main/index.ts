@@ -17,6 +17,7 @@ import { SubscriptionFetcher } from './net/SubscriptionFetcher';
 import { UniversalSubscriptionParser } from './net/UniversalSubscriptionParser';
 import { TrayManager } from './tray/TrayManager';
 import { TrafficStats } from '../types';
+import { LogManager } from './log/LogManager';
 
 let mainWindow: BrowserWindow | null = null;
 let trafficTimer: NodeJS.Timeout | null = null;
@@ -57,6 +58,8 @@ function createWindow(): void {
       nodeIntegration: false,
     },
   });
+
+  LogManager.getInstance().setMainWindow(mainWindow);
 
   // Open any external http(s) links in default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -199,8 +202,10 @@ async function handleCoreStart(): Promise<boolean> {
     settings
   );
 
+  LogManager.getInstance().addLog('info', '正在启动 Sing-box 核心代理引擎...', 'app');
   const started = await core.start(config);
   if (started) {
+    LogManager.getInstance().addLog('info', '代理核心引擎已就绪并接管网络流量', 'core');
     if (settings.systemProxyEnabled) {
       await SystemProxy.enable(
         '127.0.0.1',
@@ -208,7 +213,10 @@ async function handleCoreStart(): Promise<boolean> {
         settings.systemProxyBypassLan,
         settings.customBypassList
       );
+      LogManager.getInstance().addLog('info', `Windows 系统代理已开启 (127.0.0.1:${settings.mixedPort})`, 'system');
     }
+  } else {
+    LogManager.getInstance().addLog('error', 'Sing-box 核心启动失败，请检查配置或日志详情', 'core');
   }
   TrayManager.getInstance().updateMenu();
   return started;
@@ -217,6 +225,13 @@ async function handleCoreStart(): Promise<boolean> {
 // -------------------------------------------------------------
 // IPC Handlers
 // -------------------------------------------------------------
+
+// Logs
+ipcMain.handle('log:getAll', () => LogManager.getInstance().getLogs());
+ipcMain.handle('log:clear', () => {
+  LogManager.getInstance().clearLogs();
+  return true;
+});
 
 // Window controls
 ipcMain.on('window:minimize', () => mainWindow?.minimize());
@@ -250,8 +265,10 @@ ipcMain.handle('system:relaunchAsAdmin', () => {
 ipcMain.handle('system:flushDns', async () => {
   try {
     await promisify(exec)('ipconfig /flushdns');
+    LogManager.getInstance().addLog('info', 'Windows 本地 DNS 缓存已成功刷新 (ipconfig /flushdns)', 'system');
     return { success: true, message: 'Windows 本地 DNS 缓存已成功刷新！' };
   } catch (e: any) {
+    LogManager.getInstance().addLog('warn', `刷新 DNS 缓存失败: ${e.message}`, 'system');
     return { success: false, message: e.message };
   }
 });
@@ -264,7 +281,9 @@ ipcMain.handle('core:stop', async () => {
   await core.stop();
   if (settings.systemProxyEnabled) {
     await SystemProxy.disable();
+    LogManager.getInstance().addLog('info', 'Windows 系统代理已关闭', 'system');
   }
+  LogManager.getInstance().addLog('info', '代理核心引擎已停止连接', 'core');
   TrayManager.getInstance().updateMenu();
   return true;
 });
@@ -367,13 +386,16 @@ ipcMain.handle('dns:get', () => Database.getInstance().getDns());
 ipcMain.handle('dns:save', (_, dns) => Database.getInstance().saveDns(dns));
 
 // Speed Test
-ipcMain.handle('speedtest:latency', (_, url) => {
-  const port = Database.getInstance().getSettings().mixedPort;
-  return SpeedTestRunner.testLatency(url, 5000, port);
+ipcMain.handle('speedtest:latency', (_, url, nodeId) => {
+  const settings = Database.getInstance().getSettings();
+  const testUrl = url || settings.testUrl || 'http://cp.cloudflare.com/generate_204';
+  const timeoutMs = settings.testTimeoutMs || 5000;
+  return SpeedTestRunner.testLatency(testUrl, timeoutMs, settings.mixedPort, nodeId);
 });
-ipcMain.handle('speedtest:download', (_, url) => {
-  const port = Database.getInstance().getSettings().mixedPort;
-  return SpeedTestRunner.testDownload(url, 5, port);
+ipcMain.handle('speedtest:download', (_, url, nodeId) => {
+  const settings = Database.getInstance().getSettings();
+  const downloadUrl = url || 'http://speed.cloudflare.com/__down?bytes=5000000';
+  return SpeedTestRunner.testDownload(downloadUrl, 4, settings.mixedPort, nodeId, settings.clashApiPort || 9090);
 });
 ipcMain.handle('speedtest:cancel', () => SpeedTestRunner.cancel());
 

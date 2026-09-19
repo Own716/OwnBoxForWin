@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { ProxyNode, Subscription, RouteRule, AppRule, DnsConfig, AppSettings } from '../types';
+import { ProxyNode, Subscription, RouteRule, AppRule, DnsConfig, AppSettings, LogEntry } from '../types';
 
 export const api = {
   // Window controls
@@ -69,11 +69,19 @@ export const api = {
     save: (dns: DnsConfig) => ipcRenderer.invoke('dns:save', dns),
   },
 
+  // Logs
+  logs: {
+    getAll: (): Promise<LogEntry[]> => ipcRenderer.invoke('log:getAll'),
+    clear: (): Promise<void> => ipcRenderer.invoke('log:clear'),
+  },
+
   // Speed test
   speedTest: {
-    testLatency: (url?: string) => ipcRenderer.invoke('speedtest:latency', url),
-    testDownload: (url?: string) => ipcRenderer.invoke('speedtest:download', url),
-    cancel: () => ipcRenderer.invoke('speedtest:cancel'),
+    testLatency: (url?: string, nodeId?: string): Promise<number> =>
+      ipcRenderer.invoke('speedtest:latency', url, nodeId),
+    testDownload: (url?: string, nodeId?: string): Promise<number> =>
+      ipcRenderer.invoke('speedtest:download', url, nodeId),
+    cancel: (): Promise<void> => ipcRenderer.invoke('speedtest:cancel'),
   },
 
   // WebDAV

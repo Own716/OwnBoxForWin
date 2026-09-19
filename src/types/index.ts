@@ -199,7 +199,7 @@ export interface LogEntry {
   timestamp: string;
   level: 'debug' | 'info' | 'warn' | 'error';
   message: string;
-  source: 'core' | 'app' | 'net';
+  source: 'core' | 'app' | 'net' | 'system';
 }
 
 export interface SpeedTestResult {
