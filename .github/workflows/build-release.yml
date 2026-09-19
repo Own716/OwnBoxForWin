@@ -1,0 +1,76 @@
+name: Build and Release OwnBox PC
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Application
+        run: npm run build
+
+      - name: Ensure Core Binaries
+        shell: pwsh
+        run: |
+          if (!(Test-Path "bin")) { New-Item -ItemType Directory -Force -Path bin }
+          if (!(Test-Path "bin/sing-box.exe")) {
+            Write-Host "Downloading sing-box..."
+            Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v1.11.4/sing-box-1.11.4-windows-amd64.zip" -OutFile "sing-box.zip"
+            Expand-Archive -Path "sing-box.zip" -DestinationPath "sing-box-temp"
+            Get-ChildItem -Path "sing-box-temp" -Filter "sing-box.exe" -Recurse | Select-Object -First 1 | Move-Item -Destination "bin/sing-box.exe" -Force
+            Remove-Item -Recurse -Force "sing-box-temp", "sing-box.zip" -ErrorAction SilentlyContinue
+          }
+          if (!(Test-Path "bin/wintun.dll")) {
+            Write-Host "Downloading wintun..."
+            Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile "wintun.zip"
+            Expand-Archive -Path "wintun.zip" -DestinationPath "wintun-temp"
+            Get-ChildItem -Path "wintun-temp" -Filter "wintun.dll" -Recurse | Where-Object { $_.FullName -like "*amd64*" } | Select-Object -First 1 | Move-Item -Destination "bin/wintun.dll" -Force
+            Remove-Item -Recurse -Force "wintun-temp", "wintun.zip" -ErrorAction SilentlyContinue
+          }
+
+      - name: Package with Electron Builder
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ELECTRON_BUILDER_BINARIES_MIRROR: "https://npmmirror.com/mirrors/electron-builder-binaries/"
+          ELECTRON_MIRROR: "https://npmmirror.com/mirrors/electron/"
+        run: npm run dist
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OwnBox-Windows-x64
+          path: |
+            release/*.exe
+            release/*.zip
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.exe
+            release/*.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
