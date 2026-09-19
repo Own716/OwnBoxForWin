@@ -161,6 +161,11 @@ export const App: React.FC = () => {
     if (coreState === 'running') {
       await window.electronAPI.core.stop();
     } else {
+      if (nodes.length === 0) {
+        alert('当前节点列表为空，请先在“订阅管理”页面添加并获取节点！');
+        setCurrentTab('subscriptions');
+        return;
+      }
       await window.electronAPI.core.start();
     }
   };

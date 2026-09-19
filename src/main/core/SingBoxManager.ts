@@ -1,8 +1,18 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { EventEmitter } from 'events';
 import { CoreState } from '../../types';
+
+export function isRunningAsAdmin(): boolean {
+  if (process.platform !== 'win32') return true;
+  try {
+    execSync('net session', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export class SingBoxManager extends EventEmitter {
   private static instance: SingBoxManager;
@@ -34,10 +44,10 @@ export class SingBoxManager extends EventEmitter {
 
     for (const p of candidates) {
       if (p && fs.existsSync(p)) {
-        return p;
+        return path.resolve(p);
       }
     }
-    return path.join(process.cwd(), 'bin', 'sing-box.exe');
+    return path.resolve(process.cwd(), 'bin', 'sing-box.exe');
   }
 
   public static getInstance(): SingBoxManager {
@@ -53,6 +63,19 @@ export class SingBoxManager extends EventEmitter {
 
   public getPid(): number | undefined {
     return this.process?.pid;
+  }
+
+  public isAdmin(): boolean {
+    return isRunningAsAdmin();
+  }
+
+  public getLiveConfig(): string {
+    try {
+      if (fs.existsSync(this.configPath)) {
+        return fs.readFileSync(this.configPath, 'utf8');
+      }
+    } catch {}
+    return '{}';
   }
 
   public async getVersion(): Promise<string> {
@@ -106,6 +129,36 @@ export class SingBoxManager extends EventEmitter {
     this.setState('starting');
 
     try {
+      // Safety Check: If TUN mode is in config but not elevated, gracefully remove it to prevent fatal crash
+      const admin = this.isAdmin();
+      if (!admin && config.inbounds) {
+        const hasTun = config.inbounds.some((i: any) => i.type === 'tun');
+        if (hasTun) {
+          config.inbounds = config.inbounds.filter((i: any) => i.type !== 'tun');
+          this.emit('log', {
+            id: Math.random().toString(36).substring(2),
+            timestamp: new Date().toLocaleTimeString(),
+            level: 'warn',
+            message: '【权限保护】检测到当前以普通用户权限运行，已安全回退为系统代理模式（可在设置中以管理员身份重启启用 TUN 全局网卡）。',
+            source: 'system',
+          });
+        }
+      }
+
+      // Check config syntax before launching
+      const validation = await this.validate(config);
+      if (!validation.valid) {
+        this.emit('log', {
+          id: Math.random().toString(36).substring(2),
+          timestamp: new Date().toLocaleTimeString(),
+          level: 'error',
+          message: `配置校验失败: ${validation.error}`,
+          source: 'core',
+        });
+        this.setState('error');
+        return false;
+      }
+
       fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf8');
 
       const workingDir = path.dirname(this.binaryPath);
@@ -132,12 +185,19 @@ export class SingBoxManager extends EventEmitter {
       this.process.stderr?.on('data', (data) => {
         const lines = data.toString().split('\n');
         for (const line of lines) {
-          if (line.trim()) {
+          const trimmed = line.trim();
+          if (trimmed) {
+            let level: 'error' | 'warn' | 'info' = 'info';
+            if (/\b(fatal|panic)\b/i.test(trimmed) || (/\berror\b/i.test(trimmed) && !/\bnoerror\b/i.test(trimmed))) {
+              level = 'error';
+            } else if (/\b(warn|warning)\b/i.test(trimmed)) {
+              level = 'warn';
+            }
             this.emit('log', {
               id: Math.random().toString(36).substring(2),
               timestamp: new Date().toLocaleTimeString(),
-              level: 'error',
-              message: line.trim(),
+              level,
+              message: trimmed,
               source: 'core',
             });
           }
@@ -149,7 +209,7 @@ export class SingBoxManager extends EventEmitter {
           id: Math.random().toString(36).substring(2),
           timestamp: new Date().toLocaleTimeString(),
           level: 'error',
-          message: `Sing-box failed to start: ${err.message}`,
+          message: `内核启动失败: ${err.message}`,
           source: 'core',
         });
         this.setState('error');
@@ -159,8 +219,8 @@ export class SingBoxManager extends EventEmitter {
         this.emit('log', {
           id: Math.random().toString(36).substring(2),
           timestamp: new Date().toLocaleTimeString(),
-          level: 'warn',
-          message: `Sing-box process exited with code ${code}`,
+          level: code === 0 ? 'info' : 'warn',
+          message: `Sing-box 核心进程已停止 (退出码: ${code})`,
           source: 'core',
         });
         this.process = null;
@@ -169,11 +229,18 @@ export class SingBoxManager extends EventEmitter {
         }
       });
 
-      // Brief delay to ensure it didn't immediately crash
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      // Brief delay to verify process didn't immediately exit
+      await new Promise((resolve) => setTimeout(resolve, 800));
 
       if (this.process && !this.process.killed) {
         this.setState('running');
+        this.emit('log', {
+          id: Math.random().toString(36).substring(2),
+          timestamp: new Date().toLocaleTimeString(),
+          level: 'info',
+          message: `OwnBox 核心引擎启动成功 (PID: ${this.process.pid})`,
+          source: 'core',
+        });
         return true;
       } else {
         this.setState('error');
@@ -184,7 +251,7 @@ export class SingBoxManager extends EventEmitter {
         id: Math.random().toString(36).substring(2),
         timestamp: new Date().toLocaleTimeString(),
         level: 'error',
-        message: `Exception starting sing-box: ${e.message}`,
+        message: `启动异常: ${e.message}`,
         source: 'core',
       });
       this.setState('error');
@@ -204,7 +271,6 @@ export class SingBoxManager extends EventEmitter {
       const pid = this.process?.pid;
       if (pid) {
         try {
-          // Gracefully kill or taskkill on Windows
           spawn('taskkill', ['/F', '/T', '/PID', pid.toString()]);
         } catch {
           this.process?.kill();

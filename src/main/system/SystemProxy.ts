@@ -6,12 +6,27 @@ const execAsync = promisify(exec);
 export class SystemProxy {
   private static REG_PATH = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
 
-  public static async enable(host: string = '127.0.0.1', port: number = 2080, bypassLan: boolean = true): Promise<boolean> {
+  public static async enable(
+    host: string = '127.0.0.1',
+    port: number = 2080,
+    bypassLan: boolean = true,
+    customBypassList?: string
+  ): Promise<boolean> {
     try {
       const proxyServer = `${host}:${port}`;
-      const bypassList = bypassLan
+      let bypassList = bypassLan
         ? '<local>;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*'
         : '<local>;localhost;127.*';
+
+      if (customBypassList && customBypassList.trim()) {
+        const customParts = customBypassList
+          .split(/[\r\n,;]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (customParts.length > 0) {
+          bypassList = `${bypassList};${customParts.join(';')}`;
+        }
+      }
 
       await execAsync(
         `reg add "${this.REG_PATH}" /v ProxyEnable /t REG_DWORD /d 1 /f`

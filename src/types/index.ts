@@ -150,6 +150,7 @@ export interface AppSettings {
   inboundPass?: string;
   systemProxyEnabled: boolean;
   systemProxyBypassLan: boolean;
+  customBypassList?: string;
   
   // TUN Mode
   tunEnabled: boolean;
@@ -159,6 +160,10 @@ export interface AppSettings {
   tunStrictRoute: boolean;
   tunDnsHijack: boolean;
   tunIPv6: boolean;
+
+  // DNS
+  dnsCache?: boolean;
+  dnsOptimistic?: boolean;
   
   // Core & Routing
   routingMode: 'rule' | 'global' | 'direct';

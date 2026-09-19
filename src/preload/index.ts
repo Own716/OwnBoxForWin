@@ -17,6 +17,7 @@ export const api = {
     restart: () => ipcRenderer.invoke('core:restart'),
     getState: () => ipcRenderer.invoke('core:getState'),
     getVersion: () => ipcRenderer.invoke('core:getVersion'),
+    getLiveConfig: (): Promise<string> => ipcRenderer.invoke('core:getLiveConfig'),
     validateConfig: () => ipcRenderer.invoke('core:validateConfig'),
     onStateChange: (callback: (state: string) => void) => {
       const sub = (_: any, state: string) => callback(state);
@@ -93,11 +94,15 @@ export const api = {
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
     save: (settings: Partial<AppSettings>) => ipcRenderer.invoke('settings:save', settings),
+    resetDefaults: (): Promise<AppSettings> => ipcRenderer.invoke('settings:resetDefaults'),
   },
 
   // System
   system: {
     openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('system:openExternal', url),
+    isAdmin: (): Promise<boolean> => ipcRenderer.invoke('system:isAdmin'),
+    relaunchAsAdmin: (): Promise<void> => ipcRenderer.invoke('system:relaunchAsAdmin'),
+    flushDns: (): Promise<{ success: boolean; message: string }> => ipcRenderer.invoke('system:flushDns'),
   },
 };
 

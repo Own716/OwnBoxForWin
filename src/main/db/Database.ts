@@ -237,4 +237,52 @@ export class Database {
     this.settings = { ...this.settings, ...settings };
     this.save();
   }
+
+  public resetSettings(): AppSettings {
+    this.settings = {
+      theme: 'system',
+      language: 'zh-CN',
+      startOnBoot: false,
+      startMinimized: false,
+      autoConnectOnLaunch: false,
+      closeToTray: true,
+
+      mixedPort: 2080,
+      allowLan: false,
+      inboundAuth: false,
+      systemProxyEnabled: true,
+      systemProxyBypassLan: true,
+      customBypassList: '',
+
+      tunEnabled: false,
+      tunMtu: 9000,
+      tunStack: 'system',
+      tunAutoRoute: true,
+      tunStrictRoute: false,
+      tunDnsHijack: true,
+      tunIPv6: false,
+
+      dnsCache: true,
+      dnsOptimistic: true,
+
+      routingMode: 'rule',
+      logLevel: 'info',
+      clashApiEnabled: true,
+      clashApiPort: 9090,
+
+      testUrl: 'http://cp.cloudflare.com/generate_204',
+      testTimeoutMs: 5000,
+      testConcurrent: 10,
+
+      webdav: {
+        serverUrl: '',
+        username: '',
+        password: '',
+        remotePath: 'OwnBox',
+        autoSync: false,
+      },
+    };
+    this.save();
+    return this.settings;
+  }
 }

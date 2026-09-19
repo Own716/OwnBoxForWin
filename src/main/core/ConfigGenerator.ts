@@ -2,7 +2,7 @@ import { ProxyNode, RouteRule, AppRule, DnsConfig, AppSettings } from '../../typ
 
 export class ConfigGenerator {
   /**
-   * Generates a complete, standard Sing-box JSON configuration
+   * Generates a complete, standard Sing-box JSON configuration strictly compliant with Sing-box 1.14 / 1.15
    */
   public static generate(
     activeNodeId: string,
@@ -10,7 +10,8 @@ export class ConfigGenerator {
     rules: RouteRule[],
     appRules: AppRule[],
     dns: DnsConfig,
-    settings: AppSettings
+    settings: AppSettings,
+    forceDisableTun?: boolean
   ): Record<string, any> {
     const activeNode = nodes.find((n) => n.id === activeNodeId) || nodes[0];
 
@@ -33,7 +34,8 @@ export class ConfigGenerator {
       ];
     }
 
-    if (settings.tunEnabled) {
+    const useTun = settings.tunEnabled && !forceDisableTun;
+    if (useTun) {
       inbounds.push({
         type: 'tun',
         tag: 'tun-in',
@@ -42,6 +44,8 @@ export class ConfigGenerator {
         mtu: settings.tunMtu || 9000,
         auto_route: settings.tunAutoRoute !== false,
         strict_route: settings.tunStrictRoute || false,
+        stack: settings.tunStack || 'system',
+        endpoint_independent_nat: true,
       });
     }
 
@@ -50,6 +54,7 @@ export class ConfigGenerator {
 
     // System outbounds
     outbounds.push({ type: 'direct', tag: 'direct' });
+    outbounds.push({ type: 'block', tag: 'block' });
 
     // Node outbounds
     const nodeTags: string[] = [];
@@ -70,10 +75,15 @@ export class ConfigGenerator {
       default: mainProxyTag,
     });
 
-    // 3. DNS Configuration
+    // 3. DNS Configuration (Sing-box 1.14 / 1.15 compliant)
+    // Note: direct-dns must NOT have detour: 'direct' because detour to empty direct outbound is fatal in sing-box 1.15
     const dnsServers: any[] = [
       this.parseDnsServer('remote-dns', dns.remoteDns || 'https://1.1.1.1/dns-query', 'proxy'),
-      this.parseDnsServer('direct-dns', dns.directDns || '223.5.5.5', 'direct'),
+      this.parseDnsServer('direct-dns', dns.directDns || '223.5.5.5'),
+      {
+        tag: 'dns-local',
+        type: 'local',
+      },
     ];
 
     if (dns.mode === 'fakeip') {
@@ -81,44 +91,96 @@ export class ConfigGenerator {
         tag: 'fakeip-dns',
         type: 'fakeip',
         inet4_range: dns.fakeIpRange || '198.18.0.0/15',
+        inet6_range: 'fc00::/18',
       });
     }
 
-    const dnsRules: any[] = [
-      {
-        server: 'direct-dns',
-      },
-    ];
+    const dnsRules: any[] = [];
 
     if (dns.mode === 'fakeip') {
-      dnsRules.unshift({
-        inbound: settings.tunEnabled ? ['tun-in', 'mixed-in'] : ['mixed-in'],
+      dnsRules.push({
+        inbound: useTun ? ['tun-in', 'mixed-in'] : ['mixed-in'],
         server: 'fakeip-dns',
       });
     }
+
+    // Direct resolution rules for domestic domains
+    dnsRules.push(
+      {
+        rule_set: ['geosite-cn'],
+        server: 'direct-dns',
+      },
+      {
+        domain_suffix: [
+          '.cn',
+          'baidu.com',
+          'qq.com',
+          'alipay.com',
+          'taobao.com',
+          'jd.com',
+          'bilibili.com',
+          'zhihu.com',
+          '163.com',
+          'sina.com.cn',
+          'weibo.com',
+        ],
+        server: 'direct-dns',
+      },
+      {
+        clash_mode: 'direct',
+        server: 'direct-dns',
+      },
+      {
+        clash_mode: 'global',
+        server: 'remote-dns',
+      }
+    );
 
     const dnsConfig: any = {
       servers: dnsServers,
       rules: dnsRules,
       final: 'remote-dns',
       strategy: 'prefer_ipv4',
+      reverse_mapping: true,
     };
 
-    // 4. Route Rules
+    // 4. HTTP Clients for remote rule sets (Mandatory in Sing-box 1.14 / 1.15)
+    // Note: Do not set detour: 'direct' here to avoid empty direct outbound error
+    const http_clients = [
+      {
+        tag: 'default',
+      },
+    ];
+
+    // 5. Route Rules & Rule Sets
     const ruleSets: any[] = [
       {
         tag: 'geosite-cn',
         type: 'remote',
         format: 'binary',
         url: 'https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/cn.srs',
-        download_detour: 'direct',
+        http_client: 'default',
       },
       {
         tag: 'geoip-cn',
         type: 'remote',
         format: 'binary',
         url: 'https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/cn.srs',
-        download_detour: 'direct',
+        http_client: 'default',
+      },
+      {
+        tag: 'geosite-category-ads-all',
+        type: 'remote',
+        format: 'binary',
+        url: 'https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ads-all.srs',
+        http_client: 'default',
+      },
+      {
+        tag: 'geoip-private',
+        type: 'remote',
+        format: 'binary',
+        url: 'https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/private.srs',
+        http_client: 'default',
       },
     ];
 
@@ -130,13 +192,28 @@ export class ConfigGenerator {
         protocol: 'dns',
         action: 'hijack-dns',
       },
+      {
+        port: [53],
+        action: 'hijack-dns',
+      },
+      {
+        rule_set: ['geosite-category-ads-all'],
+        action: 'reject',
+      },
     ];
 
-    if (settings.systemProxyBypassLan) {
-      routeRules.push({
-        ip_is_private: true,
-        outbound: 'direct',
-      });
+    // LAN & Private IP bypass
+    if (settings.systemProxyBypassLan !== false) {
+      routeRules.push(
+        {
+          ip_is_private: true,
+          outbound: 'direct',
+        },
+        {
+          rule_set: ['geoip-private'],
+          outbound: 'direct',
+        }
+      );
     }
 
     // App rules (Windows process routing)
@@ -203,7 +280,7 @@ export class ConfigGenerator {
                 type: 'remote',
                 format: 'binary',
                 url: `https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/${g}.srs`,
-                download_detour: 'direct',
+                http_client: 'default',
               });
             }
           }
@@ -229,7 +306,7 @@ export class ConfigGenerator {
                 type: 'remote',
                 format: 'binary',
                 url: `https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/${g}.srs`,
-                download_detour: 'direct',
+                http_client: 'default',
               });
             }
           }
@@ -256,25 +333,32 @@ export class ConfigGenerator {
       routeRules.push(ruleObj);
     }
 
-    // Default routing based on mode
+    // Mode-specific route rules
     if (settings.routingMode === 'rule') {
-      routeRules.push({
-        rule_set: ['geosite-cn', 'geoip-cn'],
-        outbound: 'direct',
-      });
+      routeRules.push(
+        {
+          rule_set: ['geosite-cn'],
+          outbound: 'direct',
+        },
+        {
+          rule_set: ['geoip-cn'],
+          outbound: 'direct',
+        }
+      );
     }
 
     const finalOutbound = settings.routingMode === 'direct' ? 'direct' : 'proxy';
 
     const routeConfig: any = {
       default_domain_resolver: 'direct-dns',
+      default_http_client: 'default',
       rules: routeRules,
       rule_set: ruleSets,
       final: finalOutbound,
       auto_detect_interface: true,
     };
 
-    // 5. Root Configuration
+    // 6. Root Configuration
     const rootConfig: Record<string, any> = {
       log: {
         level: settings.logLevel || 'info',
@@ -284,10 +368,11 @@ export class ConfigGenerator {
       inbounds,
       outbounds,
       route: routeConfig,
+      http_clients,
     };
 
     // Clash API for GUI stats/traffic tracking
-    if (settings.clashApiEnabled) {
+    if (settings.clashApiEnabled !== false) {
       rootConfig.experimental = {
         clash_api: {
           external_controller: `127.0.0.1:${settings.clashApiPort || 9090}`,
@@ -300,109 +385,119 @@ export class ConfigGenerator {
     return rootConfig;
   }
 
-  private static parseDnsServer(tag: string, address: string, detour: string): any {
+  private static parseDnsServer(tag: string, address: string, detour?: string): any {
     if (!address) {
-      return {
+      const server: any = {
         tag,
         type: 'udp',
         server: '223.5.5.5',
         server_port: 53,
-        detour,
       };
+      if (detour && detour !== 'direct') server.detour = detour;
+      return server;
     }
 
     if (address.startsWith('https://')) {
       try {
         const url = new URL(address);
-        return {
+        const server: any = {
           tag,
           type: 'https',
           server: url.hostname,
           server_port: url.port ? parseInt(url.port, 10) : 443,
           path: url.pathname || '/dns-query',
-          detour,
         };
+        if (detour && detour !== 'direct') server.detour = detour;
+        return server;
       } catch {
-        return {
+        const server: any = {
           tag,
           type: 'https',
           server: '1.1.1.1',
           server_port: 443,
           path: '/dns-query',
-          detour,
         };
+        if (detour && detour !== 'direct') server.detour = detour;
+        return server;
       }
     }
 
     if (address.startsWith('tls://')) {
       try {
         const url = new URL(address);
-        return {
+        const server: any = {
           tag,
           type: 'tls',
           server: url.hostname,
           server_port: url.port ? parseInt(url.port, 10) : 853,
-          detour,
         };
+        if (detour && detour !== 'direct') server.detour = detour;
+        return server;
       } catch {
-        return {
+        const server: any = {
           tag,
           type: 'tls',
-          server: '1.1.1.1',
+          server: '8.8.8.8',
           server_port: 853,
-          detour,
         };
+        if (detour && detour !== 'direct') server.detour = detour;
+        return server;
       }
     }
 
     if (address.startsWith('quic://')) {
       try {
         const url = new URL(address);
-        return {
+        const server: any = {
           tag,
           type: 'quic',
           server: url.hostname,
           server_port: url.port ? parseInt(url.port, 10) : 853,
-          detour,
         };
+        if (detour && detour !== 'direct') server.detour = detour;
+        return server;
       } catch {
-        return {
+        const server: any = {
           tag,
           type: 'quic',
           server: 'dns.adguard-dns.com',
           server_port: 853,
-          detour,
         };
+        if (detour && detour !== 'direct') server.detour = detour;
+        return server;
       }
     }
 
     if (address === 'local') {
-      return {
+      const server: any = {
         tag,
         type: 'local',
-        detour,
       };
+      if (detour && detour !== 'direct') server.detour = detour;
+      return server;
     }
 
     const cleaned = address.replace(/^udp:\/\//, '');
     const colonIdx = cleaned.indexOf(':');
     if (colonIdx !== -1) {
-      return {
+      const server: any = {
         tag,
         type: 'udp',
         server: cleaned.substring(0, colonIdx),
         server_port: parseInt(cleaned.substring(colonIdx + 1), 10) || 53,
-        detour,
       };
+      if (detour && detour !== 'direct') server.detour = detour;
+      return server;
     }
 
-    return {
+    const server: any = {
       tag,
       type: 'udp',
       server: cleaned || '223.5.5.5',
       server_port: 53,
-      detour,
     };
+    if (detour && detour !== 'direct') server.detour = detour;
+    return server;
   }
 
   private static buildNodeOutbound(node: ProxyNode): any | null {

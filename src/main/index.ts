@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import http from 'http';
+import { spawn, exec } from 'child_process';
+import { promisify } from 'util';
 import { Database } from './db/Database';
 import { SingBoxManager } from './core/SingBoxManager';
 import { ConfigGenerator } from './core/ConfigGenerator';
@@ -178,6 +180,16 @@ async function handleCoreStart(): Promise<boolean> {
   const nodes = db.getNodes();
   const activeNodeId = db.getActiveNodeId();
 
+  if (nodes.length === 0) {
+    core.emit('log', {
+      id: Math.random().toString(36).substring(2),
+      timestamp: new Date().toLocaleTimeString(),
+      level: 'warn',
+      message: '【提示】当前节点列表中暂无可用节点。建议先添加或更新订阅后再进行连接。',
+      source: 'app',
+    });
+  }
+
   const config = ConfigGenerator.generate(
     activeNodeId,
     nodes,
@@ -190,7 +202,12 @@ async function handleCoreStart(): Promise<boolean> {
   const started = await core.start(config);
   if (started) {
     if (settings.systemProxyEnabled) {
-      await SystemProxy.enable('127.0.0.1', settings.mixedPort, settings.systemProxyBypassLan);
+      await SystemProxy.enable(
+        '127.0.0.1',
+        settings.mixedPort,
+        settings.systemProxyBypassLan,
+        settings.customBypassList
+      );
     }
   }
   TrayManager.getInstance().updateMenu();
@@ -219,6 +236,25 @@ ipcMain.handle('system:openExternal', (_, url: string) => {
   }
   return false;
 });
+ipcMain.handle('system:isAdmin', () => SingBoxManager.getInstance().isAdmin());
+ipcMain.handle('system:relaunchAsAdmin', () => {
+  const execPath = process.execPath;
+  const script = `Start-Process -FilePath "${execPath}" -Verb RunAs`;
+  spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script], {
+    detached: true,
+    stdio: 'ignore',
+  }).unref();
+  setTimeout(() => app.quit(), 500);
+  return true;
+});
+ipcMain.handle('system:flushDns', async () => {
+  try {
+    await promisify(exec)('ipconfig /flushdns');
+    return { success: true, message: 'Windows 本地 DNS 缓存已成功刷新！' };
+  } catch (e: any) {
+    return { success: false, message: e.message };
+  }
+});
 
 // Core
 ipcMain.handle('core:start', async () => handleCoreStart());
@@ -238,6 +274,7 @@ ipcMain.handle('core:restart', async () => {
 });
 ipcMain.handle('core:getState', () => SingBoxManager.getInstance().getState());
 ipcMain.handle('core:getVersion', () => SingBoxManager.getInstance().getVersion());
+ipcMain.handle('core:getLiveConfig', () => SingBoxManager.getInstance().getLiveConfig());
 ipcMain.handle('core:validateConfig', () => {
   const db = Database.getInstance();
   const config = ConfigGenerator.generate(
@@ -438,9 +475,19 @@ ipcMain.handle('settings:save', async (_, s) => {
 
   // 2. System Proxy sync
   const core = SingBoxManager.getInstance();
-  if (s.systemProxyEnabled !== undefined || s.mixedPort !== undefined || s.systemProxyBypassLan !== undefined) {
+  if (
+    s.systemProxyEnabled !== undefined ||
+    s.mixedPort !== undefined ||
+    s.systemProxyBypassLan !== undefined ||
+    s.customBypassList !== undefined
+  ) {
     if (currentSettings.systemProxyEnabled && core.getState() === 'running') {
-      await SystemProxy.enable('127.0.0.1', currentSettings.mixedPort, currentSettings.systemProxyBypassLan);
+      await SystemProxy.enable(
+        '127.0.0.1',
+        currentSettings.mixedPort,
+        currentSettings.systemProxyBypassLan,
+        currentSettings.customBypassList
+      );
     } else if (!currentSettings.systemProxyEnabled) {
       await SystemProxy.disable();
     }
@@ -448,19 +495,20 @@ ipcMain.handle('settings:save', async (_, s) => {
 
   // 3. Core dynamic reload if running
   if (core.getState() === 'running') {
-    if (
-      s.mixedPort !== undefined ||
-      s.tunEnabled !== undefined ||
-      s.tunMtu !== undefined ||
-      s.routingMode !== undefined ||
-      s.allowLan !== undefined ||
-      s.clashApiPort !== undefined ||
-      s.logLevel !== undefined
-    ) {
-      await handleCoreStart();
-    }
+    await handleCoreStart();
   }
 
   TrayManager.getInstance().updateMenu();
   return true;
+});
+
+ipcMain.handle('settings:resetDefaults', async () => {
+  const db = Database.getInstance();
+  const newSettings = db.resetSettings();
+  const core = SingBoxManager.getInstance();
+  if (core.getState() === 'running') {
+    await handleCoreStart();
+  }
+  TrayManager.getInstance().updateMenu();
+  return newSettings;
 });
