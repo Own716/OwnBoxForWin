@@ -36,17 +36,26 @@ export class ConfigGenerator {
 
     const useTun = settings.tunEnabled && !forceDisableTun;
     if (useTun) {
-      inbounds.push({
+      const tunInbound: any = {
         type: 'tun',
         tag: 'tun-in',
         interface_name: 'OwnBoxTun',
-        address: ['172.19.0.1/30', 'fdfe:dcba:9876::1/126'],
+        address: settings.tunIPv6
+          ? ['172.19.0.1/30', 'fdfe:dcba:9876::1/126']
+          : ['172.19.0.1/30'],
         mtu: settings.tunMtu || 9000,
         auto_route: settings.tunAutoRoute !== false,
         strict_route: settings.tunStrictRoute || false,
-        stack: settings.tunStack || 'system',
-        endpoint_independent_nat: true,
-      });
+        endpoint_independent_nat: settings.tunEndpointIndependentNat !== false,
+      };
+
+      // In Sing-box 1.15.0+, the new native TCP/IP stack is used when `stack` is omitted.
+      // Only set legacy `stack` when user explicitly chooses 'system', 'gvisor', or 'mixed'.
+      if (settings.tunStack && settings.tunStack !== 'native') {
+        tunInbound.stack = settings.tunStack;
+      }
+
+      inbounds.push(tunInbound);
     }
 
     // 2. Outbounds

@@ -18,7 +18,7 @@ export const Logs: React.FC = () => {
       id: 'init-1',
       timestamp: new Date().toLocaleTimeString(),
       level: 'info',
-      message: 'OwnBox PC v1.0.0 正式版就绪',
+      message: 'OwnBox PC v1.0.1 正式版就绪',
       source: 'app',
     },
     {

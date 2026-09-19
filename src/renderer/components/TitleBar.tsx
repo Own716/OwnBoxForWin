@@ -42,7 +42,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ theme, coreState, activeNode
         <span className="font-semibold text-xs tracking-wide text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
           OwnBox
           <span className="text-[10px] font-medium px-1.5 py-0.2 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-            v1.0.0 正式版
+            v1.0.1 正式版
           </span>
         </span>
 

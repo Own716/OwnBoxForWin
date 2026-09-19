@@ -313,18 +313,37 @@ export const Settings: React.FC<SettingsProps> = ({
 
             <div className="flex items-center justify-between py-3">
               <div>
-                <h4 className="font-semibold text-slate-800 dark:text-slate-200">TUN 协议栈实现 (Stack)</h4>
-                <p className="text-[11px] text-slate-400">推荐 System (原生 Wintun 驱动) 或 gVisor (纯用户态协议栈)</p>
+                <div className="flex items-center space-x-2">
+                  <h4 className="font-semibold text-slate-800 dark:text-slate-200">TUN 协议栈实现 (Stack)</h4>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/15 text-blue-600 dark:text-blue-400 font-medium">Sing-box 1.15+</span>
+                </div>
+                <p className="text-[11px] text-slate-400">推荐使用 1.15 原生全新 TCP/IP 堆栈，官方独家自研，极致吞吐、超低延迟与低内存</p>
               </div>
               <select
-                value={formData.tunStack}
+                value={formData.tunStack || 'native'}
                 onChange={(e) => setFormData({ ...formData, tunStack: e.target.value as any })}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none"
+                className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none text-xs"
               >
-                <option value="system">System (原生系统驱动，性能极佳)</option>
-                <option value="gvisor">gVisor (高性能 Google 纯用户态)</option>
-                <option value="mixed">Mixed (混合式协议栈)</option>
+                <option value="native">Native (Sing-box 1.15+ 原生自研堆栈，极速/推荐)</option>
+                <option value="system">System (旧版系统驱动协议栈)</option>
+                <option value="gvisor">gVisor (旧版 Google 纯用户态协议栈)</option>
+                <option value="mixed">Mixed (旧版混合协议栈)</option>
               </select>
+            </div>
+
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <h4 className="font-semibold text-slate-800 dark:text-slate-200">全锥型 NAT (Endpoint Independent NAT)</h4>
+                <p className="text-[11px] text-slate-400">独立端点 NAT 映射，极大优化多人联机游戏、P2P 握手、BT 下载与网络语音</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={formData.tunEndpointIndependentNat !== false}
+                onChange={(e) =>
+                  setFormData({ ...formData, tunEndpointIndependentNat: e.target.checked })
+                }
+                className="w-4 h-4 rounded text-blue-600 focus:ring-0"
+              />
             </div>
 
             <div className="flex items-center justify-between py-3">
@@ -362,6 +381,19 @@ export const Settings: React.FC<SettingsProps> = ({
                 type="checkbox"
                 checked={formData.tunStrictRoute}
                 onChange={(e) => setFormData({ ...formData, tunStrictRoute: e.target.checked })}
+                className="w-4 h-4 rounded text-blue-600 focus:ring-0"
+              />
+            </div>
+
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <h4 className="font-semibold text-slate-800 dark:text-slate-200">TUN 接管 IPv6 网络流量</h4>
+                <p className="text-[11px] text-slate-400">分配 ULA 私有网段 (fdfe:dcba:9876::1/126)，防止 IPv6 地址与 DNS 泄露</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={formData.tunIPv6 || false}
+                onChange={(e) => setFormData({ ...formData, tunIPv6: e.target.checked })}
                 className="w-4 h-4 rounded text-blue-600 focus:ring-0"
               />
             </div>

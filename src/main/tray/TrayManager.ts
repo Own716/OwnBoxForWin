@@ -96,7 +96,7 @@ export class TrayManager {
 
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: `OwnBox v1.0.0 (${isRunning ? '● 已连接' : '○ 未连接'})`,
+        label: `OwnBox v1.0.1 (${isRunning ? '● 已连接' : '○ 未连接'})`,
         enabled: false,
       },
       { type: 'separator' },

@@ -155,11 +155,12 @@ export interface AppSettings {
   // TUN Mode
   tunEnabled: boolean;
   tunMtu: number;
-  tunStack: 'system' | 'gvisor' | 'mixed';
+  tunStack: 'native' | 'system' | 'gvisor' | 'mixed';
   tunAutoRoute: boolean;
   tunStrictRoute: boolean;
   tunDnsHijack: boolean;
   tunIPv6: boolean;
+  tunEndpointIndependentNat?: boolean;
 
   // DNS
   dnsCache?: boolean;

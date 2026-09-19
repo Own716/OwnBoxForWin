@@ -54,11 +54,12 @@ export class Database {
 
       tunEnabled: false,
       tunMtu: 9000,
-      tunStack: 'system',
+      tunStack: 'native',
       tunAutoRoute: true,
       tunStrictRoute: false,
       tunDnsHijack: true,
       tunIPv6: false,
+      tunEndpointIndependentNat: true,
 
       routingMode: 'rule',
       logLevel: 'info',
@@ -256,11 +257,12 @@ export class Database {
 
       tunEnabled: false,
       tunMtu: 9000,
-      tunStack: 'system',
+      tunStack: 'native',
       tunAutoRoute: true,
       tunStrictRoute: false,
       tunDnsHijack: true,
       tunIPv6: false,
+      tunEndpointIndependentNat: true,
 
       dnsCache: true,
       dnsOptimistic: true,

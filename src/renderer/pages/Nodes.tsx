@@ -84,7 +84,23 @@ export const Nodes: React.FC<NodesProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('all'); // subscription group
   const [selectedRegion, setSelectedRegion] = useState('all'); // country / region
-  const [sortBy, setSortBy] = useState<'default' | 'ping-asc' | 'ping-desc' | 'name-asc' | 'type' | 'starred'>('ping-asc');
+  const [sortBy, setSortByState] = useState<'default' | 'ping-asc' | 'ping-desc' | 'name-asc' | 'type' | 'starred'>(() => {
+    const saved = localStorage.getItem('ownbox_node_sort_by');
+    if (saved && ['default', 'ping-asc', 'ping-desc', 'name-asc', 'type', 'starred'].includes(saved)) {
+      return saved as any;
+    }
+    return 'default';
+  });
+
+  const setSortBy = (val: 'default' | 'ping-asc' | 'ping-desc' | 'name-asc' | 'type' | 'starred') => {
+    setSortByState(val);
+    try {
+      localStorage.setItem('ownbox_node_sort_by', val);
+    } catch {
+      // ignore
+    }
+  };
+
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [editingNode, setEditingNode] = useState<ProxyNode | null>(null);
   const [isAdding, setIsAdding] = useState(false);
@@ -152,48 +168,49 @@ export const Nodes: React.FC<NodesProps> = ({
   ];
 
   // 3. Filter & Sort
-  const filteredNodes = nodes
-    .filter((n) => {
-      // Search
-      const matchSearch =
-        n.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        n.server.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        n.type.toLowerCase().includes(searchQuery.toLowerCase());
+  const baseFiltered = nodes.filter((n) => {
+    // Search
+    const matchSearch =
+      n.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      n.server.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      n.type.toLowerCase().includes(searchQuery.toLowerCase());
 
-      // Subscription Group filter
-      const matchGroup = selectedGroup === 'all' || (n.groupId || 'default') === selectedGroup;
+    // Subscription Group filter
+    const matchGroup = selectedGroup === 'all' || (n.groupId || 'default') === selectedGroup;
 
-      // Region filter
-      const reg = detectRegion(n.name, n.server);
-      const matchRegion = selectedRegion === 'all' || reg.id === selectedRegion;
+    // Region filter
+    const reg = detectRegion(n.name, n.server);
+    const matchRegion = selectedRegion === 'all' || reg.id === selectedRegion;
 
-      return matchSearch && matchGroup && matchRegion;
-    })
-    .sort((a, b) => {
-      if (sortBy === 'ping-asc') {
-        const pingA = a.ping && a.ping > 0 ? a.ping : 999999;
-        const pingB = b.ping && b.ping > 0 ? b.ping : 999999;
-        return pingA - pingB;
-      }
-      if (sortBy === 'ping-desc') {
-        const pingA = a.ping && a.ping > 0 ? a.ping : -1;
-        const pingB = b.ping && b.ping > 0 ? b.ping : -1;
-        return pingB - pingA;
-      }
-      if (sortBy === 'name-asc') {
-        return a.name.localeCompare(b.name, 'zh-Hans-CN');
-      }
-      if (sortBy === 'type') {
-        return a.type.localeCompare(b.type);
-      }
-      if (sortBy === 'starred') {
-        const starA = a.starred ? 1 : 0;
-        const starB = b.starred ? 1 : 0;
-        return starB - starA;
-      }
-      // default: preserve original order
-      return 0;
-    });
+    return matchSearch && matchGroup && matchRegion;
+  });
+
+  const filteredNodes = sortBy === 'default'
+    ? baseFiltered
+    : [...baseFiltered].sort((a, b) => {
+        if (sortBy === 'ping-asc') {
+          const pingA = a.ping && a.ping > 0 ? a.ping : 999999;
+          const pingB = b.ping && b.ping > 0 ? b.ping : 999999;
+          return pingA - pingB;
+        }
+        if (sortBy === 'ping-desc') {
+          const pingA = a.ping && a.ping > 0 ? a.ping : -1;
+          const pingB = b.ping && b.ping > 0 ? b.ping : -1;
+          return pingB - pingA;
+        }
+        if (sortBy === 'name-asc') {
+          return a.name.localeCompare(b.name, 'zh-Hans-CN');
+        }
+        if (sortBy === 'type') {
+          return a.type.localeCompare(b.type);
+        }
+        if (sortBy === 'starred') {
+          const starA = a.starred ? 1 : 0;
+          const starB = b.starred ? 1 : 0;
+          return starB - starA;
+        }
+        return 0;
+      });
 
   // Ping actions
   const handlePingNode = async (node: ProxyNode, e: React.MouseEvent) => {
@@ -530,13 +547,13 @@ export const Nodes: React.FC<NodesProps> = ({
                       onClick={(e) => handlePingNode(node, e)}
                       className={`text-[10px] font-medium px-2 py-0.5 rounded-full flex items-center space-x-1 transition-colors ${
                         hasPing
-                          ? node.ping! < 120
-                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                            : node.ping! < 250
-                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-                            : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'
+                          ? node.ping! < 250
+                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-semibold'
+                            : node.ping! < 450
+                            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-medium'
+                            : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-semibold'
                           : isTimeout
-                          ? 'bg-red-500/10 text-red-500 border border-red-500/20'
+                          ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-semibold'
                           : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                       }`}
                       title="点击单节点测速"

@@ -1,7 +1,7 @@
 {
   "name": "ownbox",
   "productName": "OwnBox",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "基于 Sing-box 官方原生核心打造的现代化通用代理客户端与网络调试工具",
   "main": "dist/main/index.js",
   "author": {
