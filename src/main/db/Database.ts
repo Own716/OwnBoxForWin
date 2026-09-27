@@ -137,17 +137,36 @@ export class Database {
   private load(): void {
     try {
       if (fs.existsSync(this.dbPath)) {
-        const raw = fs.readFileSync(this.dbPath, 'utf8');
-        const data = JSON.parse(raw);
-        if (data.nodes) {
-          this.nodes = (data.nodes as ProxyNode[]).filter((n) => !n.server || !n.server.includes('ownbox.org'));
+        let raw = '';
+        try {
+          raw = fs.readFileSync(this.dbPath, 'utf8');
+        } catch (readErr: any) {
+          console.error('Failed to read database file:', readErr);
+          this.recoverFromBackup();
+          return;
         }
-        if (data.subscriptions) this.subscriptions = data.subscriptions;
-        if (data.rules) this.rules = data.rules;
-        if (data.appRules) this.appRules = data.appRules;
-        if (data.dns) this.dns = { ...this.dns, ...data.dns };
-        if (data.settings) this.settings = { ...this.settings, ...data.settings };
-        if (data.activeNodeId) this.activeNodeId = data.activeNodeId;
+
+        try {
+          const data = JSON.parse(raw);
+          if (data.nodes) {
+            this.nodes = (data.nodes as ProxyNode[]).filter((n) => !n.server || !n.server.includes('ownbox.org'));
+          }
+          if (data.subscriptions) this.subscriptions = data.subscriptions;
+          if (data.rules) this.rules = data.rules;
+          if (data.appRules) this.appRules = data.appRules;
+          if (data.dns) this.dns = { ...this.dns, ...data.dns };
+          if (data.settings) this.settings = { ...this.settings, ...data.settings };
+          if (data.activeNodeId) this.activeNodeId = data.activeNodeId;
+        } catch (jsonErr: any) {
+          console.error('Database JSON parse error, attempting recovery:', jsonErr);
+          // 1. Backup corrupted file
+          const corruptPath = `${this.dbPath}.corrupted.${Date.now()}`;
+          try {
+            fs.copyFileSync(this.dbPath, corruptPath);
+          } catch {}
+          // 2. Try loading from .bak
+          this.recoverFromBackup();
+        }
       } else {
         this.save();
       }
@@ -156,7 +175,30 @@ export class Database {
     }
   }
 
+  private recoverFromBackup(): void {
+    const bakPath = `${this.dbPath}.bak`;
+    if (fs.existsSync(bakPath)) {
+      try {
+        const raw = fs.readFileSync(bakPath, 'utf8');
+        const data = JSON.parse(raw);
+        if (data.nodes) this.nodes = data.nodes;
+        if (data.subscriptions) this.subscriptions = data.subscriptions;
+        if (data.rules) this.rules = data.rules;
+        if (data.appRules) this.appRules = data.appRules;
+        if (data.dns) this.dns = { ...this.dns, ...data.dns };
+        if (data.settings) this.settings = { ...this.settings, ...data.settings };
+        if (data.activeNodeId) this.activeNodeId = data.activeNodeId;
+        // Save back restored state
+        this.save();
+        return;
+      } catch {}
+    }
+    this.save();
+  }
+
   public save(): void {
+    const tempPath = `${this.dbPath}.tmp`;
+    const bakPath = `${this.dbPath}.bak`;
     try {
       const data = {
         activeNodeId: this.activeNodeId,
@@ -167,9 +209,25 @@ export class Database {
         dns: this.dns,
         settings: this.settings,
       };
-      fs.writeFileSync(this.dbPath, JSON.stringify(data, null, 2), 'utf8');
+      const jsonStr = JSON.stringify(data, null, 2);
+
+      // 1. Atomic write to temporary file
+      fs.writeFileSync(tempPath, jsonStr, 'utf8');
+
+      // 2. Create/update backup file
+      if (fs.existsSync(this.dbPath)) {
+        try {
+          fs.copyFileSync(this.dbPath, bakPath);
+        } catch {}
+      }
+
+      // 3. Rename temp file to target file (atomic in Windows NTFS)
+      fs.renameSync(tempPath, this.dbPath);
     } catch (e) {
-      console.error('Failed to save database:', e);
+      console.error('Failed to save database atomically:', e);
+      try {
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      } catch {}
     }
   }
 
@@ -188,7 +246,9 @@ export class Database {
 
   public saveNodes(nodes: ProxyNode[]): void {
     this.nodes = nodes;
-    if (!this.nodes.some((n) => n.id === this.activeNodeId) && this.nodes.length > 0) {
+    if (this.nodes.length === 0) {
+      this.activeNodeId = '';
+    } else if (!this.nodes.some((n) => n.id === this.activeNodeId)) {
       this.activeNodeId = this.nodes[0].id;
     }
     this.save();

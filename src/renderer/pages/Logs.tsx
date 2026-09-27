@@ -13,22 +13,7 @@ import {
 import { LogEntry } from '../../types';
 
 export const Logs: React.FC = () => {
-  const [logs, setLogs] = useState<LogEntry[]>([
-    {
-      id: 'init-1',
-      timestamp: new Date().toLocaleTimeString(),
-      level: 'info',
-      message: 'OwnBox PC v1.0.1 正式版就绪',
-      source: 'app',
-    },
-    {
-      id: 'init-2',
-      timestamp: new Date().toLocaleTimeString(),
-      level: 'info',
-      message: 'Sing-box 官方核心环境已载入: v1.15',
-      source: 'core',
-    },
-  ]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [levelFilter, setLevelFilter] = useState<'all' | 'debug' | 'info' | 'warn' | 'error'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isPaused, setIsPaused] = useState(false);
@@ -84,7 +69,17 @@ export const Logs: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
+    if (window.electronAPI?.logs?.exportLogs) {
+      const res = await window.electronAPI.logs.exportLogs();
+      if (res.success && res.filePath) {
+        alert(`日志已成功导出至:\n${res.filePath}`);
+        return;
+      } else if (res.error) {
+        alert(`导出失败: ${res.error}`);
+        return;
+      }
+    }
     const text = filteredLogs.map((l) => `[${l.timestamp}] [${l.level.toUpperCase()}] ${l.message}`).join('\n');
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);

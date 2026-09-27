@@ -22,15 +22,7 @@ export class SingBoxManager extends EventEmitter {
   private configPath: string;
   private binaryPath: string;
 
-  private log(level: 'info' | 'warn' | 'error' | 'debug', message: string, source: 'core' | 'app' | 'system' = 'core') {
-    const entry: LogEntry = {
-      id: Math.random().toString(36).substring(2),
-      timestamp: new Date().toLocaleTimeString(),
-      level,
-      message,
-      source,
-    };
-    this.emit('log', entry);
+  private log(level: 'info' | 'warn' | 'error' | 'debug', message: string, source: 'core' | 'app' | 'system' | 'net' = 'core') {
     LogManager.getInstance().addLog(level, message, source);
   }
 
@@ -94,18 +86,38 @@ export class SingBoxManager extends EventEmitter {
   public async getVersion(): Promise<string> {
     return new Promise((resolve) => {
       try {
+        if (!fs.existsSync(this.binaryPath)) {
+          resolve('检测失败 (未找到核心文件)');
+          return;
+        }
         const proc = spawn(this.binaryPath, ['version']);
         let output = '';
         proc.stdout?.on('data', (d) => (output += d.toString()));
-        proc.on('close', () => {
+        proc.on('close', (code) => {
           const match = output.match(/sing-box version ([^\s\n]+)/i);
-          resolve(match ? match[1] : '1.15.0-alpha.6');
+          if (match) {
+            resolve(match[1]);
+          } else {
+            resolve('检测失败');
+          }
         });
-        proc.on('error', () => resolve('1.15.0-alpha.6'));
-      } catch {
-        resolve('1.15.0-alpha.6');
+        proc.on('error', (err) => {
+          LogManager.getInstance().addLog('warn', `获取核心版本异常: ${err.message}`, 'core');
+          resolve('检测失败');
+        });
+      } catch (e: any) {
+        LogManager.getInstance().addLog('warn', `获取核心版本失败: ${e.message}`, 'core');
+        resolve('检测失败');
       }
     });
+  }
+
+  public killOrphans(): void {
+    if (this.process?.pid) {
+      try {
+        execSync(`taskkill /F /T /PID ${this.process.pid}`, { stdio: 'ignore' });
+      } catch {}
+    }
   }
 
   public async validate(config: Record<string, any>): Promise<{ valid: boolean; error?: string }> {
@@ -239,37 +251,31 @@ export class SingBoxManager extends EventEmitter {
   }
 
   public async stop(): Promise<void> {
-    if (!this.process || this.state === 'stopped') {
-      this.setState('stopped');
+    if (!this.process && this.state === 'stopped') {
       return;
     }
 
     this.setState('stopping');
 
-    return new Promise((resolve) => {
-      const pid = this.process?.pid;
-      if (pid) {
-        try {
-          spawn('taskkill', ['/F', '/T', '/PID', pid.toString()]);
-        } catch {
-          this.process?.kill();
-        }
+    const pid = this.process?.pid;
+    if (pid) {
+      try {
+        spawn('taskkill', ['/F', '/T', '/PID', pid.toString()], { windowsHide: true });
+      } catch {
+        this.process?.kill('SIGKILL');
       }
+    }
 
-      const checkInterval = setInterval(() => {
-        if (!this.process) {
-          clearInterval(checkInterval);
+    await new Promise<void>((resolve) => {
+      const startTime = Date.now();
+      const interval = setInterval(() => {
+        if (!this.process || Date.now() - startTime > 2500) {
+          clearInterval(interval);
+          this.process = null;
           this.setState('stopped');
           resolve();
         }
-      }, 100);
-
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        this.process = null;
-        this.setState('stopped');
-        resolve();
-      }, 2000);
+      }, 50);
     });
   }
 

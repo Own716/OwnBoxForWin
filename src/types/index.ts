@@ -197,6 +197,7 @@ export interface TrafficStats {
 export interface LogEntry {
   id: string;
   timestamp: string;
+  timeFormatted?: string;
   level: 'debug' | 'info' | 'warn' | 'error';
   message: string;
   source: 'core' | 'app' | 'net' | 'system';

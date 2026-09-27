@@ -1,8 +1,8 @@
 import { net } from 'electron';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface SubscriptionFetchResult {
   content: string;
@@ -57,8 +57,11 @@ export class SubscriptionFetcher {
 
     // 2. Try native Windows curl.exe (direct connection with -L to follow redirects and -k for SSL)
     try {
-      const curlCmd = `curl.exe -s -L -k -A "${this.USER_AGENTS}" --max-time 15 -i "${trimmedUrl}"`;
-      const { stdout } = await execAsync(curlCmd, { maxBuffer: 10 * 1024 * 1024 });
+      const { stdout } = await execFileAsync(
+        'curl.exe',
+        ['-s', '-L', '-k', '-A', this.USER_AGENTS, '--max-time', '15', '-i', trimmedUrl],
+        { maxBuffer: 10 * 1024 * 1024 }
+      );
       const parsed = this.parseCurlOutput(stdout);
       if (parsed.content && parsed.content.length > 5) {
         return parsed;
@@ -77,8 +80,11 @@ export class SubscriptionFetcher {
 
     for (const proxy of proxyList) {
       try {
-        const curlProxyCmd = `curl.exe -s -L -k -x "${proxy}" -A "${this.USER_AGENTS}" --max-time 10 -i "${trimmedUrl}"`;
-        const { stdout } = await execAsync(curlProxyCmd, { maxBuffer: 10 * 1024 * 1024 });
+        const { stdout } = await execFileAsync(
+          'curl.exe',
+          ['-s', '-L', '-k', '-x', proxy, '-A', this.USER_AGENTS, '--max-time', '10', '-i', trimmedUrl],
+          { maxBuffer: 10 * 1024 * 1024 }
+        );
         const parsed = this.parseCurlOutput(stdout);
         if (parsed.content && parsed.content.length > 5) {
           return parsed;

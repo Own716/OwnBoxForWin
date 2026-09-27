@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Github,
   Send,
@@ -20,13 +20,22 @@ interface AboutProps {
 export const About: React.FC<AboutProps> = ({ theme, coreVersion }) => {
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState('v1.0.2 预览版');
+
+  useEffect(() => {
+    if (window.electronAPI?.system?.getAppVersion) {
+      window.electronAPI.system.getAppVersion().then((ver) => {
+        if (ver) setAppVersion(`v${ver} 预览版`);
+      });
+    }
+  }, []);
 
   const handleCheckUpdate = async () => {
     setIsCheckingUpdate(true);
     setUpdateMsg(null);
     try {
-      await new Promise((r) => setTimeout(r, 800));
-      setUpdateMsg('当前已是最新版本 v1.0.1 正式版');
+      await new Promise((r) => setTimeout(r, 600));
+      setUpdateMsg(`当前已是最新版本 ${appVersion}`);
     } finally {
       setIsCheckingUpdate(false);
     }
@@ -52,7 +61,7 @@ export const About: React.FC<AboutProps> = ({ theme, coreVersion }) => {
           <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 flex items-center justify-center gap-2">
             OwnBox
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold border border-blue-500/20">
-              v1.0.1 正式版
+              {appVersion}
             </span>
           </h2>
           <p className="text-xs text-slate-400 mt-1.5 max-w-md mx-auto">

@@ -56,12 +56,13 @@ export class SpeedTestRunner {
     testUrl: string = 'http://cp.cloudflare.com/generate_204',
     timeoutMs: number = 5000,
     proxyPort?: number,
-    nodeId?: string
+    nodeId?: string,
+    clashPort: number = 9090
   ): Promise<number> {
     // 1. If nodeId is specified, test via Sing-box Clash API (measures exact proxy outbound delay)
     if (nodeId) {
       try {
-        const clashDelay = await this.testViaClashApi(nodeId, testUrl, timeoutMs);
+        const clashDelay = await this.testViaClashApi(nodeId, testUrl, timeoutMs, clashPort);
         if (clashDelay > 0) return clashDelay;
       } catch {
         // Specifically testing this node; if Clash API probe failed, return -1 (timeout)
@@ -84,10 +85,15 @@ export class SpeedTestRunner {
     return this.testViaHttp(testUrl, timeoutMs);
   }
 
-  private static testViaClashApi(nodeId: string, testUrl: string, timeoutMs: number): Promise<number> {
+  private static testViaClashApi(
+    nodeId: string,
+    testUrl: string,
+    timeoutMs: number,
+    clashPort: number = 9090
+  ): Promise<number> {
     return new Promise((resolve, reject) => {
       const tag = `node-${nodeId}`;
-      const url = `http://127.0.0.1:9090/proxies/${encodeURIComponent(tag)}/delay?timeout=${timeoutMs}&url=${encodeURIComponent(testUrl)}`;
+      const url = `http://127.0.0.1:${clashPort}/proxies/${encodeURIComponent(tag)}/delay?timeout=${timeoutMs}&url=${encodeURIComponent(testUrl)}`;
       const req = http.get(url, { timeout: timeoutMs }, (res) => {
         let raw = '';
         res.on('data', (c) => (raw += c));
@@ -128,7 +134,7 @@ export class SpeedTestRunner {
             path: testUrl,
             headers: {
               Host: urlObj.host,
-              'User-Agent': 'OwnBox/1.0.1',
+              'User-Agent': 'OwnBox/1.0.2',
             },
             timeout: timeoutMs,
           };
@@ -139,7 +145,7 @@ export class SpeedTestRunner {
             port: urlObj.port || (isHttps ? 443 : 80),
             path: urlObj.pathname + urlObj.search,
             headers: {
-              'User-Agent': 'OwnBox/1.0.1',
+              'User-Agent': 'OwnBox/1.0.2',
             },
             timeout: timeoutMs,
           };
@@ -222,7 +228,7 @@ export class SpeedTestRunner {
             path: downloadUrl,
             headers: {
               Host: urlObj.host,
-              'User-Agent': 'OwnBox/1.0.1 SpeedTest',
+              'User-Agent': 'OwnBox/1.0.2 SpeedTest',
             },
             timeout: (durationSec + 3) * 1000,
           };
@@ -234,7 +240,7 @@ export class SpeedTestRunner {
             path: urlObj.pathname + urlObj.search,
             headers: {
               Host: urlObj.host,
-              'User-Agent': 'OwnBox/1.0.1 SpeedTest',
+              'User-Agent': 'OwnBox/1.0.2 SpeedTest',
             },
             timeout: (durationSec + 3) * 1000,
           };

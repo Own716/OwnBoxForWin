@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import http from 'http';
+import dns from 'dns';
 import { spawn, exec } from 'child_process';
 import { promisify } from 'util';
 import { Database } from './db/Database';
@@ -98,45 +99,78 @@ function createWindow(): void {
   TrayManager.getInstance().init(mainWindow);
 }
 
+let isAppQuitting = false;
+
 app.whenReady().then(() => {
   createWindow();
 
-  // Traffic polling loop
+  let lastSampleTime = 0;
+  let lastDownloadTotal = 0;
+  let lastUploadTotal = 0;
+  let hasSampledBefore = false;
+
+  // Real traffic & connections polling loop
   trafficTimer = setInterval(async () => {
     const core = SingBoxManager.getInstance();
     if (core.getState() === 'running') {
-      if (!startTime) startTime = Date.now();
+      if (!startTime) {
+        startTime = Date.now();
+        lastSampleTime = Date.now();
+        hasSampledBefore = false;
+      }
       const uptime = Math.floor((Date.now() - startTime) / 1000);
+      const settings = Database.getInstance().getSettings();
+      const port = settings.clashApiPort || 9090;
+      const secret = settings.clashApiSecret;
 
-      // Attempt to query Clash API traffic
       let rx = 0;
       let tx = 0;
+      let activeConnections = 0;
+
       try {
-        const stats = await fetchClashTraffic();
-        rx = stats.down;
-        tx = stats.up;
+        const stats = await fetchClashConnections(port, secret);
+        const now = Date.now();
+        const elapsedSec = (now - lastSampleTime) / 1000;
+
+        if (hasSampledBefore && elapsedSec > 0) {
+          rx = Math.max(0, Math.round((stats.downloadTotal - lastDownloadTotal) / elapsedSec));
+          tx = Math.max(0, Math.round((stats.uploadTotal - lastUploadTotal) / elapsedSec));
+        }
+
+        lastDownloadTotal = stats.downloadTotal;
+        lastUploadTotal = stats.uploadTotal;
+        lastSampleTime = now;
+        hasSampledBefore = true;
+
+        totalRx = stats.downloadTotal;
+        totalTx = stats.uploadTotal;
+        activeConnections = stats.connectionsCount;
       } catch {
-        // Fallback simulation when idle
-        rx = Math.floor(Math.random() * 8000) + 1200;
-        tx = Math.floor(Math.random() * 2000) + 300;
+        // Core might be starting up or shutting down; output true 0, never mock
+        rx = 0;
+        tx = 0;
+        activeConnections = 0;
       }
 
-      totalRx += rx;
-      totalTx += tx;
+      // Real node latency from active node if tested
+      const activeNodeId = Database.getInstance().getActiveNodeId();
+      const activeNode = Database.getInstance().getNodes().find((n) => n.id === activeNodeId);
+      const latency = activeNode && activeNode.ping && activeNode.ping > 0 ? activeNode.ping : 0;
 
       const traffic: TrafficStats = {
         downloadSpeed: rx,
         uploadSpeed: tx,
         totalDownload: totalRx,
         totalUpload: totalTx,
-        latency: 48,
+        latency,
         uptime,
-        activeConnections: 12,
+        activeConnections,
       };
 
       mainWindow?.webContents.send('core:traffic', traffic);
     } else {
       startTime = 0;
+      hasSampledBefore = false;
     }
   }, 1000);
 
@@ -147,33 +181,74 @@ app.whenReady().then(() => {
   }
 });
 
-app.on('before-quit', async () => {
-  if (trafficTimer) clearInterval(trafficTimer);
-  const core = SingBoxManager.getInstance();
-  await core.stop();
-  await SystemProxy.disable();
-  TrayManager.getInstance().destroy();
+app.on('before-quit', async (e) => {
+  if (!isAppQuitting) {
+    e.preventDefault();
+    isAppQuitting = true;
+    if (trafficTimer) {
+      clearInterval(trafficTimer);
+      trafficTimer = null;
+    }
+    try {
+      await handleCoreStop();
+      await SystemProxy.restoreOriginal();
+      await LogManager.getInstance().destroy();
+      TrayManager.getInstance().destroy();
+    } catch (err) {
+      console.error('Error during cleanup on quit:', err);
+    }
+    app.quit();
+  }
 });
 
-function fetchClashTraffic(): Promise<{ up: number; down: number }> {
+function fetchClashConnections(
+  port: number,
+  secret?: string
+): Promise<{ downloadTotal: number; uploadTotal: number; connectionsCount: number }> {
   return new Promise((resolve, reject) => {
-    const req = http.get('http://127.0.0.1:9090/traffic', (res) => {
-      let data = '';
-      res.on('data', (chunk) => (data += chunk));
-      res.on('end', () => {
-        try {
-          resolve(JSON.parse(data));
-        } catch {
-          reject();
-        }
-      });
-    });
-    req.on('error', () => reject());
-    req.setTimeout(500, () => {
+    const headers: Record<string, string> = {};
+    if (secret) {
+      headers['Authorization'] = `Bearer ${secret}`;
+    }
+    const req = http.get(
+      `http://127.0.0.1:${port}/connections`,
+      { headers, timeout: 800 },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            resolve({
+              downloadTotal: typeof parsed.downloadTotal === 'number' ? parsed.downloadTotal : 0,
+              uploadTotal: typeof parsed.uploadTotal === 'number' ? parsed.uploadTotal : 0,
+              connectionsCount: Array.isArray(parsed.connections) ? parsed.connections.length : 0,
+            });
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
+    );
+    req.on('error', (err) => reject(err));
+    req.on('timeout', () => {
       req.destroy();
-      reject();
+      reject(new Error('timeout'));
     });
   });
+}
+
+async function handleCoreStop(): Promise<boolean> {
+  const core = SingBoxManager.getInstance();
+  const settings = Database.getInstance().getSettings();
+  await core.stop();
+  if (settings.systemProxyEnabled) {
+    await SystemProxy.disable();
+    LogManager.getInstance().addLog('info', 'Windows 系统代理已关闭', 'system');
+  }
+  LogManager.getInstance().addLog('info', '代理核心引擎已停止连接', 'core');
+  TrayManager.getInstance().updateMenu();
+  return true;
 }
 
 async function handleCoreStart(): Promise<boolean> {
@@ -184,13 +259,11 @@ async function handleCoreStart(): Promise<boolean> {
   const activeNodeId = db.getActiveNodeId();
 
   if (nodes.length === 0) {
-    core.emit('log', {
-      id: Math.random().toString(36).substring(2),
-      timestamp: new Date().toLocaleTimeString(),
-      level: 'warn',
-      message: '【提示】当前节点列表中暂无可用节点。建议先添加或更新订阅后再进行连接。',
-      source: 'app',
-    });
+    LogManager.getInstance().addLog(
+      'warn',
+      '【提示】当前节点列表中暂无可用节点。建议先添加或更新订阅后再进行连接。',
+      'app'
+    );
   }
 
   const config = ConfigGenerator.generate(
@@ -232,6 +305,9 @@ ipcMain.handle('log:clear', () => {
   LogManager.getInstance().clearLogs();
   return true;
 });
+ipcMain.handle('log:export', async () => {
+  return LogManager.getInstance().exportLogs();
+});
 
 // Window controls
 ipcMain.on('window:minimize', () => mainWindow?.minimize());
@@ -272,23 +348,13 @@ ipcMain.handle('system:flushDns', async () => {
     return { success: false, message: e.message };
   }
 });
+ipcMain.handle('system:getAppVersion', () => app.getVersion());
 
 // Core
 ipcMain.handle('core:start', async () => handleCoreStart());
-ipcMain.handle('core:stop', async () => {
-  const core = SingBoxManager.getInstance();
-  const settings = Database.getInstance().getSettings();
-  await core.stop();
-  if (settings.systemProxyEnabled) {
-    await SystemProxy.disable();
-    LogManager.getInstance().addLog('info', 'Windows 系统代理已关闭', 'system');
-  }
-  LogManager.getInstance().addLog('info', '代理核心引擎已停止连接', 'core');
-  TrayManager.getInstance().updateMenu();
-  return true;
-});
+ipcMain.handle('core:stop', async () => handleCoreStop());
 ipcMain.handle('core:restart', async () => {
-  await ipcMain.emit('core:stop');
+  await handleCoreStop();
   return handleCoreStart();
 });
 ipcMain.handle('core:getState', () => SingBoxManager.getInstance().getState());
@@ -307,10 +373,7 @@ ipcMain.handle('core:validateConfig', () => {
   return SingBoxManager.getInstance().validate(config);
 });
 
-// Forward core logs
-SingBoxManager.getInstance().on('log', (log) => {
-  mainWindow?.webContents.send('core:log', log);
-});
+// Forward core state change
 SingBoxManager.getInstance().on('stateChange', (state) => {
   mainWindow?.webContents.send('core:stateChange', state);
 });
@@ -384,18 +447,60 @@ ipcMain.handle('routing:getRunningApps', () => ProcessScanner.getRunningProcesse
 // DNS
 ipcMain.handle('dns:get', () => Database.getInstance().getDns());
 ipcMain.handle('dns:save', (_, dns) => Database.getInstance().saveDns(dns));
+ipcMain.handle('dns:testResolve', async (_, domain: string) => {
+  const start = Date.now();
+  try {
+    const addresses = await dns.promises.resolve4(domain);
+    const duration = Date.now() - start;
+    return {
+      success: true,
+      ip: addresses[0] || '无返回记录',
+      allIps: addresses,
+      latency: duration,
+    };
+  } catch (e: any) {
+    try {
+      const res = await dns.promises.lookup(domain);
+      const duration = Date.now() - start;
+      return {
+        success: true,
+        ip: res.address,
+        allIps: [res.address],
+        latency: duration,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.message || '域名解析失败',
+        latency: Date.now() - start,
+      };
+    }
+  }
+});
 
 // Speed Test
 ipcMain.handle('speedtest:latency', (_, url, nodeId) => {
   const settings = Database.getInstance().getSettings();
   const testUrl = url || settings.testUrl || 'http://cp.cloudflare.com/generate_204';
   const timeoutMs = settings.testTimeoutMs || 5000;
-  return SpeedTestRunner.testLatency(testUrl, timeoutMs, settings.mixedPort, nodeId);
+  return SpeedTestRunner.testLatency(
+    testUrl,
+    timeoutMs,
+    settings.mixedPort,
+    nodeId,
+    settings.clashApiPort || 9090
+  );
 });
 ipcMain.handle('speedtest:download', (_, url, nodeId) => {
   const settings = Database.getInstance().getSettings();
   const downloadUrl = url || 'http://speed.cloudflare.com/__down?bytes=5000000';
-  return SpeedTestRunner.testDownload(downloadUrl, 4, settings.mixedPort, nodeId, settings.clashApiPort || 9090);
+  return SpeedTestRunner.testDownload(
+    downloadUrl,
+    4,
+    settings.mixedPort,
+    nodeId,
+    settings.clashApiPort || 9090
+  );
 });
 ipcMain.handle('speedtest:cancel', () => SpeedTestRunner.cancel());
 

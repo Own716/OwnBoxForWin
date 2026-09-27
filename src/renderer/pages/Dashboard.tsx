@@ -15,6 +15,7 @@ import { ProxyNode, TrafficStats, AppSettings } from '../../types';
 
 interface DashboardProps {
   coreState: string;
+  coreVersion?: string;
   onToggleConnect: () => void;
   nodes: ProxyNode[];
   activeNodeId: string;
@@ -27,6 +28,7 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({
   coreState,
+  coreVersion,
   onToggleConnect,
   nodes,
   activeNodeId,
@@ -232,7 +234,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <Activity className="w-4 h-4 text-amber-500" />
           </div>
           <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
-            {isConnected ? `${activeNode?.ping || 48} ms` : '-'}
+            {isConnected
+              ? activeNode?.ping && activeNode.ping > 0
+                ? `${activeNode.ping} ms`
+                : traffic.latency > 0
+                ? `${traffic.latency} ms`
+                : '已就绪'
+              : '-'}
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
             状态: {isConnected ? '网络畅通' : '空闲'}
@@ -247,8 +255,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
             {isConnected ? formatUptime(traffic.uptime) : '00:00:00'}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            核心: Sing-box v1.15
+          <div className="text-[11px] text-slate-400 mt-1 truncate" title={coreVersion || 'Sing-box'}>
+            核心: {coreVersion ? coreVersion.replace('sing-box version ', 'v') : 'Sing-box 核心'}
           </div>
         </div>
       </div>

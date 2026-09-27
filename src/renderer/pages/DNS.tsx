@@ -22,15 +22,22 @@ export const DNS: React.FC<DNSProps> = ({ dns, onSaveDns }) => {
   };
 
   const handleTestDns = async () => {
-    if (!testDomain) return;
+    if (!testDomain || !testDomain.trim()) return;
     setIsTesting(true);
     setTestResult(null);
     try {
-      // Simulate DNS resolution check
-      await new Promise((r) => setTimeout(r, 600));
-      setTestResult(`解析成功: ${testDomain} -> 172.217.160.110 (延迟: 36ms)`);
-    } catch {
-      setTestResult('解析超时或失败');
+      if (window.electronAPI?.dns?.testResolve) {
+        const res = await window.electronAPI.dns.testResolve(testDomain.trim());
+        if (res.success) {
+          setTestResult(`解析成功: ${testDomain} -> ${res.ip} (延迟: ${res.latency}ms)`);
+        } else {
+          setTestResult(`解析失败: ${res.error || '无法解析该域名'}`);
+        }
+      } else {
+        setTestResult('DNS 测试接口未就绪');
+      }
+    } catch (e: any) {
+      setTestResult(`解析失败: ${e.message || '网络异常'}`);
     } finally {
       setIsTesting(false);
     }

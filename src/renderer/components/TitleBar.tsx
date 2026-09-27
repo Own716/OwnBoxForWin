@@ -11,10 +11,16 @@ interface TitleBarProps {
 
 export const TitleBar: React.FC<TitleBarProps> = ({ theme, coreState, activeNodeName }) => {
   const [isMaximized, setIsMaximized] = useState(false);
+  const [appVersion, setAppVersion] = useState('v1.0.2 预览版');
 
   useEffect(() => {
     if (window.electronAPI) {
       window.electronAPI.window.isMaximized().then(setIsMaximized);
+      if (window.electronAPI.system?.getAppVersion) {
+        window.electronAPI.system.getAppVersion().then((ver) => {
+          if (ver) setAppVersion(`v${ver} 预览版`);
+        });
+      }
     }
   }, []);
 
@@ -42,7 +48,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ theme, coreState, activeNode
         <span className="font-semibold text-xs tracking-wide text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
           OwnBox
           <span className="text-[10px] font-medium px-1.5 py-0.2 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-            v1.0.1 正式版
+            {appVersion}
           </span>
         </span>
 

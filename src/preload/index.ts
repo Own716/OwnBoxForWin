@@ -67,12 +67,18 @@ export const api = {
   dns: {
     get: (): Promise<DnsConfig> => ipcRenderer.invoke('dns:get'),
     save: (dns: DnsConfig) => ipcRenderer.invoke('dns:save', dns),
+    testResolve: (
+      domain: string
+    ): Promise<{ success: boolean; ip?: string; allIps?: string[]; latency?: number; error?: string }> =>
+      ipcRenderer.invoke('dns:testResolve', domain),
   },
 
   // Logs
   logs: {
     getAll: (): Promise<LogEntry[]> => ipcRenderer.invoke('log:getAll'),
     clear: (): Promise<void> => ipcRenderer.invoke('log:clear'),
+    exportLogs: (): Promise<{ success: boolean; filePath?: string; error?: string }> =>
+      ipcRenderer.invoke('log:export'),
   },
 
   // Speed test
@@ -111,6 +117,7 @@ export const api = {
     isAdmin: (): Promise<boolean> => ipcRenderer.invoke('system:isAdmin'),
     relaunchAsAdmin: (): Promise<void> => ipcRenderer.invoke('system:relaunchAsAdmin'),
     flushDns: (): Promise<{ success: boolean; message: string }> => ipcRenderer.invoke('system:flushDns'),
+    getAppVersion: (): Promise<string> => ipcRenderer.invoke('system:getAppVersion'),
   },
 };
 

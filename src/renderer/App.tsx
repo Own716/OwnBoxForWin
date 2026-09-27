@@ -79,7 +79,7 @@ export const App: React.FC = () => {
     uploadSpeed: 0,
     totalDownload: 0,
     totalUpload: 0,
-    latency: 48,
+    latency: 0,
     uptime: 0,
     activeConnections: 0,
   });
@@ -255,6 +255,7 @@ export const App: React.FC = () => {
             {currentTab === 'dashboard' && (
               <Dashboard
                 coreState={coreState}
+                coreVersion={coreVersion}
                 onToggleConnect={handleToggleConnect}
                 nodes={nodes}
                 activeNodeId={activeNodeId}

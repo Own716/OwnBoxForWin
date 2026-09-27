@@ -1,3 +1,4 @@
+import path from 'path';
 import { ProxyNode, RouteRule, AppRule, DnsConfig, AppSettings } from '../../types';
 
 export class ConfigGenerator {
@@ -234,11 +235,18 @@ export class ConfigGenerator {
       } else {
         ruleItem.outbound = app.action;
       }
-      if (app.name) {
-        const exeName = app.name.endsWith('.exe') ? app.name : `${app.name}.exe`;
-        ruleItem.process_name = [exeName];
-      }
+
+      let procName = '';
       if (app.exePath) {
+        procName = path.basename(app.exePath);
+      } else if (app.name) {
+        procName = app.name.endsWith('.exe') ? app.name : `${app.name}.exe`;
+      }
+
+      if (procName) {
+        ruleItem.process_name = [procName];
+      }
+      if (app.exePath && (app.exePath.includes('\\') || app.exePath.includes('/'))) {
         ruleItem.process_path = [app.exePath];
       }
       routeRules.push(ruleItem);
