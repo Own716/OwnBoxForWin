@@ -36,7 +36,7 @@ jobs:
           if (!(Test-Path "bin")) { New-Item -ItemType Directory -Force -Path bin }
           if (!(Test-Path "bin/sing-box.exe")) {
             Write-Host "Downloading sing-box..."
-            Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v1.11.4/sing-box-1.11.4-windows-amd64.zip" -OutFile "sing-box.zip"
+            Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v1.15.0-alpha.6/sing-box-1.15.0-alpha.6-windows-amd64.zip" -OutFile "sing-box.zip"
             Expand-Archive -Path "sing-box.zip" -DestinationPath "sing-box-temp"
             Get-ChildItem -Path "sing-box-temp" -Filter "sing-box.exe" -Recurse | Select-Object -First 1 | Move-Item -Destination "bin/sing-box.exe" -Force
             Remove-Item -Recurse -Force "sing-box-temp", "sing-box.zip" -ErrorAction SilentlyContinue
@@ -62,7 +62,6 @@ jobs:
           name: OwnBox-Windows-x64
           path: |
             release/*.exe
-            release/*.zip
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
@@ -70,7 +69,6 @@ jobs:
         with:
           files: |
             release/*.exe
-            release/*.zip
           draft: false
           prerelease: false
           generate_release_notes: true
