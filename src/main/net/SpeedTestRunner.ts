@@ -134,7 +134,7 @@ export class SpeedTestRunner {
             path: testUrl,
             headers: {
               Host: urlObj.host,
-              'User-Agent': 'OwnBox/1.0.2',
+              'User-Agent': 'OwnBox/1.0.3',
             },
             timeout: timeoutMs,
           };
@@ -145,7 +145,7 @@ export class SpeedTestRunner {
             port: urlObj.port || (isHttps ? 443 : 80),
             path: urlObj.pathname + urlObj.search,
             headers: {
-              'User-Agent': 'OwnBox/1.0.2',
+              'User-Agent': 'OwnBox/1.0.3',
             },
             timeout: timeoutMs,
           };
@@ -228,7 +228,7 @@ export class SpeedTestRunner {
             path: downloadUrl,
             headers: {
               Host: urlObj.host,
-              'User-Agent': 'OwnBox/1.0.2 SpeedTest',
+              'User-Agent': 'OwnBox/1.0.3 SpeedTest',
             },
             timeout: (durationSec + 3) * 1000,
           };
@@ -240,7 +240,7 @@ export class SpeedTestRunner {
             path: urlObj.pathname + urlObj.search,
             headers: {
               Host: urlObj.host,
-              'User-Agent': 'OwnBox/1.0.2 SpeedTest',
+              'User-Agent': 'OwnBox/1.0.3 SpeedTest',
             },
             timeout: (durationSec + 3) * 1000,
           };

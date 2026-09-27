@@ -14,6 +14,7 @@ import { TcpPing } from './net/TcpPing';
 import { SpeedTestRunner } from './net/SpeedTestRunner';
 import { WebDAVClient } from './net/WebDAVClient';
 import { BackupMigrator } from './db/BackupMigrator';
+import { BackupService } from './db/backup/BackupService';
 import { SubscriptionFetcher } from './net/SubscriptionFetcher';
 import { UniversalSubscriptionParser } from './net/UniversalSubscriptionParser';
 import { TrayManager } from './tray/TrayManager';
@@ -518,18 +519,15 @@ ipcMain.handle('webdav:backup', async () => {
   const client = new WebDAVClient(cfg.serverUrl, cfg.username, cfg.password);
   await client.createDir(cfg.remotePath || 'OwnBox');
 
-  const content = BackupMigrator.exportOwnBoxBackup(
-    db.getNodes(),
-    db.getSubscriptions(),
-    db.getRules(),
-    db.getAppRules(),
-    db.getDns(),
-    settings
-  );
+  const content = await BackupService.exportWindowsBackup({ profiles: true, rules: true, settings: true });
 
   const filename = `${cfg.remotePath || 'OwnBox'}/ownbox_backup_${Date.now()}.ownboxbackup`;
+  const latestFilename = `${cfg.remotePath || 'OwnBox'}/latest.ownboxbackup`;
   const success = await client.upload(filename, content);
   if (success) {
+    try {
+      await client.upload(latestFilename, content);
+    } catch {}
     cfg.lastSyncTime = Date.now();
     db.saveSettings({ webdav: cfg });
   }
@@ -541,37 +539,23 @@ ipcMain.handle('webdav:restore', async () => {
   if (!cfg.serverUrl) throw new Error('WebDAV server not configured');
   const client = new WebDAVClient(cfg.serverUrl, cfg.username, cfg.password);
   const content = await client.download(`${cfg.remotePath || 'OwnBox'}/latest.ownboxbackup`);
-  const data = BackupMigrator.importBackup(content);
-  if (data.nodes) db.saveNodes(data.nodes);
-  if (data.subscriptions) db.saveSubscriptions(data.subscriptions);
-  if (data.routing?.rules) db.saveRules(data.routing.rules);
-  if (data.routing?.appRules) db.saveAppRules(data.routing.appRules);
-  if (data.dns) db.saveDns(data.dns);
-  return true;
+  const result = await BackupService.importWithTransaction(content, { profiles: true, rules: true, settings: true });
+  return result.success;
 });
 
 // Backup
-ipcMain.handle('backup:export', () => {
-  const db = Database.getInstance();
-  return BackupMigrator.exportOwnBoxBackup(
-    db.getNodes(),
-    db.getSubscriptions(),
-    db.getRules(),
-    db.getAppRules(),
-    db.getDns(),
-    db.getSettings()
-  );
-});
-ipcMain.handle('backup:import', (_, content) => {
-  const db = Database.getInstance();
-  const data = BackupMigrator.importBackup(content);
-  if (data.nodes) db.saveNodes(data.nodes);
-  if (data.subscriptions) db.saveSubscriptions(data.subscriptions);
-  if (data.routing?.rules) db.saveRules(data.routing.rules);
-  if (data.routing?.appRules) db.saveAppRules(data.routing.appRules);
-  if (data.dns) db.saveDns(data.dns);
-  return true;
-});
+ipcMain.handle('backup:export', (_, categories) => BackupService.exportWindowsBackup(categories));
+ipcMain.handle('backup:exportAndroid', (_, categories) => BackupService.exportAndroidBackup(categories));
+ipcMain.handle('backup:previewImport', (_, content, categories) => BackupService.previewImport(content, categories));
+ipcMain.handle('backup:importWithTransaction', (_, content, categories, mode) =>
+  BackupService.importWithTransaction(content, categories, mode)
+);
+ipcMain.handle('backup:createLocalBackup', () => BackupService.createLocalBackup());
+ipcMain.handle('backup:restoreLocalBackup', () => BackupService.restoreLocalBackup());
+ipcMain.handle('backup:getLatestLocalBackupInfo', () => BackupService.getLatestLocalBackupInfo());
+ipcMain.handle('backup:import', (_, content) =>
+  BackupService.importWithTransaction(content, { profiles: true, rules: true, settings: true })
+);
 ipcMain.handle('backup:importLinks', (_, text) => {
   const nodes = BackupMigrator.parseNodeLinks(text);
   if (nodes.length > 0) {

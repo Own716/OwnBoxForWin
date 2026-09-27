@@ -99,7 +99,17 @@ export const api = {
 
   // Backup & Restore
   backup: {
-    exportData: (): Promise<string> => ipcRenderer.invoke('backup:export'),
+    exportData: (categories?: any): Promise<string> => ipcRenderer.invoke('backup:export', categories),
+    exportAndroid: (categories?: any): Promise<string> => ipcRenderer.invoke('backup:exportAndroid', categories),
+    previewImport: (content: string, categories?: any): Promise<any> =>
+      ipcRenderer.invoke('backup:previewImport', content, categories),
+    importWithTransaction: (content: string, categories?: any, mode?: 'merge' | 'replace'): Promise<any> =>
+      ipcRenderer.invoke('backup:importWithTransaction', content, categories, mode),
+    createLocalBackup: (): Promise<{ success: boolean; filePath: string }> =>
+      ipcRenderer.invoke('backup:createLocalBackup'),
+    restoreLocalBackup: (): Promise<any> => ipcRenderer.invoke('backup:restoreLocalBackup'),
+    getLatestLocalBackupInfo: (): Promise<{ exists: boolean; timestamp?: number; size?: number; filePath?: string }> =>
+      ipcRenderer.invoke('backup:getLatestLocalBackupInfo'),
     importData: (content: string) => ipcRenderer.invoke('backup:import', content),
     importLinks: (text: string): Promise<ProxyNode[]> => ipcRenderer.invoke('backup:importLinks', text),
   },

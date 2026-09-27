@@ -20,7 +20,7 @@ interface AboutProps {
 export const About: React.FC<AboutProps> = ({ theme, coreVersion }) => {
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
-  const [appVersion, setAppVersion] = useState('v1.0.2 预览版');
+  const [appVersion, setAppVersion] = useState('v1.0.3 预览版');
 
   useEffect(() => {
     if (window.electronAPI?.system?.getAppVersion) {

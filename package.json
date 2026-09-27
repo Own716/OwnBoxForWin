@@ -1,7 +1,7 @@
 {
   "name": "ownbox",
   "productName": "OwnBox",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "基于 Sing-box 官方原生核心打造的现代化通用代理客户端与网络调试工具",
   "main": "dist/main/index.js",
   "author": {
@@ -17,6 +17,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && tsc -p tsconfig.node.json",
+    "test": "npx tsx --test src/__tests__/backup.test.ts",
     "dist": "npm run build && electron-builder",
     "dist:dir": "npm run build && electron-builder --dir"
   },
@@ -39,6 +40,7 @@
     "electron-builder": "^25.1.8",
     "postcss": "^8.5.2",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.3",
     "vite": "^6.1.0"
   },

@@ -239,3 +239,47 @@ export interface InstalledAppInfo {
   publisher?: string;
   version?: string;
 }
+
+export interface BackupCategories {
+  profiles: boolean; // 分组和配置 (groups + nodes)
+  rules: boolean;    // 路由规则 (rules + appRules)
+  settings: boolean; // 设置 (settings + dns + webdav)
+}
+
+export interface BackupPreviewItem {
+  type: 'group' | 'node' | 'rule' | 'appRule' | 'setting';
+  name: string;
+  action: 'add' | 'update' | 'skip';
+  detail?: string;
+}
+
+export interface BackupPreviewResult {
+  valid: boolean;
+  format: 'ownbox_windows' | 'ownbox_android' | 'singbox_config' | 'unknown';
+  categories: BackupCategories;
+  counts: {
+    groups: { total: number; add: number; update: number; skip: number };
+    nodes: { total: number; add: number; update: number; skip: number };
+    rules: { total: number; add: number; update: number; skip: number };
+    appRules: { total: number; add: number; update: number; skip: number };
+    settings: { total: number; changed: number };
+    unparseable: number;
+  };
+  itemsPreview: BackupPreviewItem[];
+  warnings: string[];
+  error?: string;
+}
+
+export interface BackupImportResult {
+  success: boolean;
+  message: string;
+  snapshotPath?: string;
+  importedCounts: {
+    groups: number;
+    nodes: number;
+    rules: number;
+    appRules: number;
+    settings: number;
+  };
+}
+
