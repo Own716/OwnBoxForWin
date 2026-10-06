@@ -21,12 +21,15 @@ export interface ProxyNode {
   groupId: string;
   starred?: boolean;
   ping?: number; // ms (-1 for timeout)
+  httpLatency?: number; // ms (-1 for timeout)
+  downloadSpeed?: number; // bits per second
   trafficUp?: number; // bytes
   trafficDown?: number; // bytes
   lastTested?: number; // timestamp
   
   // Auth & Security
   uuid?: string;
+  username?: string;
   password?: string;
   method?: string; // SS / VMess cipher
   alterId?: number; // VMess
@@ -47,6 +50,8 @@ export interface ProxyNode {
   transport?: 'tcp' | 'ws' | 'grpc' | 'http' | 'xhttp';
   transportPath?: string;
   transportHost?: string;
+  xhttpMode?: 'auto' | 'download' | 'upload' | 'stream-up' | 'stream-one';
+  xhttpExtraHeaders?: Record<string, string>;
   
   // WireGuard specific
   privateKey?: string;
@@ -61,6 +66,8 @@ export interface ProxyNode {
   downMbps?: number;
   obfs?: string;
   congestionControl?: string; // bbr, cubic
+  authStr?: string; // Hysteria 1
+  protocol?: string; // Hysteria 1 protocol
   
   // Raw Sing-box Outbound JSON option fallback
   rawOutbound?: Record<string, any>;
@@ -182,7 +189,7 @@ export interface AppSettings {
   webdav: WebDAVConfig;
 }
 
-export type CoreState = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
+export type CoreState = 'stopped' | 'starting' | 'running' | 'stopping' | 'error' | 'crashed';
 
 export interface TrafficStats {
   uploadSpeed: number; // bytes/s

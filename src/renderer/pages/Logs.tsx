@@ -33,12 +33,21 @@ export const Logs: React.FC = () => {
     }
 
     // Subscribe to live log streaming
-    const unsub = window.electronAPI.core.onLog((entry: LogEntry) => {
-      setLogs((prev) => [...prev.slice(-999), entry]); // keep last 1000 lines
-    });
+    const handleNewLog = (entry: LogEntry) => {
+      setLogs((prev) => {
+        if (prev.length > 0 && prev[prev.length - 1].id === entry.id) {
+          return prev;
+        }
+        return [...prev.slice(-999), entry];
+      });
+    };
+
+    const unsubCore = window.electronAPI.core?.onLog?.(handleNewLog);
+    const unsubLogs = window.electronAPI.logs?.onLogAdded?.(handleNewLog);
 
     return () => {
-      unsub();
+      unsubCore?.();
+      unsubLogs?.();
     };
   }, []);
 
@@ -169,9 +178,24 @@ export const Logs: React.FC = () => {
             const isWarn = log.level === 'warn';
             return (
               <div key={log.id} className="flex items-start space-x-2 leading-relaxed">
-                <span className="text-slate-500 select-none">{log.timestamp}</span>
+                <span className="text-slate-500 select-none shrink-0 font-mono text-[11px]">
+                  {log.timeFormatted || (log.timestamp ? log.timestamp.split('T')[1]?.replace('Z', '') : '')}
+                </span>
                 <span
-                  className={`text-[10px] font-bold uppercase px-1 rounded select-none ${
+                  className={`text-[9px] font-bold uppercase px-1 py-0.2 rounded select-none shrink-0 ${
+                    log.source === 'core'
+                      ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                      : log.source === 'system'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : log.source === 'net'
+                      ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                      : 'bg-slate-700/50 text-slate-400 border border-slate-600/30'
+                  }`}
+                >
+                  {log.source || 'app'}
+                </span>
+                <span
+                  className={`text-[10px] font-bold uppercase px-1 rounded select-none shrink-0 ${
                     isErr
                       ? 'bg-red-500/20 text-red-400'
                       : isWarn

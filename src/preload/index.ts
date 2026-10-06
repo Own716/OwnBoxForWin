@@ -24,10 +24,14 @@ export const api = {
       ipcRenderer.on('core:stateChange', sub);
       return () => ipcRenderer.removeListener('core:stateChange', sub);
     },
-    onLog: (callback: (log: any) => void) => {
+    onLog: (callback: (log: LogEntry) => void) => {
       const sub = (_: any, log: any) => callback(log);
       ipcRenderer.on('core:log', sub);
-      return () => ipcRenderer.removeListener('core:log', sub);
+      ipcRenderer.on('log:added', sub);
+      return () => {
+        ipcRenderer.removeListener('core:log', sub);
+        ipcRenderer.removeListener('log:added', sub);
+      };
     },
     onTraffic: (callback: (traffic: any) => void) => {
       const sub = (_: any, t: any) => callback(t);
@@ -79,6 +83,15 @@ export const api = {
     clear: (): Promise<void> => ipcRenderer.invoke('log:clear'),
     exportLogs: (): Promise<{ success: boolean; filePath?: string; error?: string }> =>
       ipcRenderer.invoke('log:export'),
+    onLogAdded: (callback: (log: LogEntry) => void) => {
+      const sub = (_: any, log: any) => callback(log);
+      ipcRenderer.on('log:added', sub);
+      ipcRenderer.on('core:log', sub);
+      return () => {
+        ipcRenderer.removeListener('log:added', sub);
+        ipcRenderer.removeListener('core:log', sub);
+      };
+    },
   },
 
   // Speed test
@@ -87,7 +100,7 @@ export const api = {
       ipcRenderer.invoke('speedtest:latency', url, nodeId),
     testDownload: (url?: string, nodeId?: string): Promise<number> =>
       ipcRenderer.invoke('speedtest:download', url, nodeId),
-    cancel: (): Promise<void> => ipcRenderer.invoke('speedtest:cancel'),
+    cancel: (nodeId?: string): Promise<void> => ipcRenderer.invoke('speedtest:cancel', nodeId),
   },
 
   // WebDAV

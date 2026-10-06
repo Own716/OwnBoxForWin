@@ -20,7 +20,7 @@ interface SingleNodeSpeedModalProps {
   node: ProxyNode;
   isActive: boolean;
   onSelectNode: (id: string) => void;
-  onSaveNodePing: (nodeId: string, ping: number) => void;
+  onSaveNodePing: (nodeId: string, ping: number, httpLatency?: number, downloadSpeed?: number) => void;
   onClose: () => void;
 }
 
@@ -151,8 +151,10 @@ export const SingleNodeSpeedModal: React.FC<SingleNodeSpeedModalProps> = ({
   };
 
   const handleSaveToNode = () => {
-    const val = tcpPing !== null && tcpPing > 0 ? tcpPing : (httpLatency !== null ? httpLatency : -1);
-    onSaveNodePing(node.id, val);
+    const pingVal = tcpPing !== null ? tcpPing : (node.ping ?? -1);
+    const httpVal = httpLatency !== null ? httpLatency : undefined;
+    const dlVal = downloadSpeed !== null ? downloadSpeed : undefined;
+    onSaveNodePing(node.id, pingVal, httpVal, dlVal);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2000);
   };

@@ -70,5 +70,5 @@ jobs:
           files: |
             release/*.exe
           draft: false
-          prerelease: true
+          prerelease: false
           generate_release_notes: true

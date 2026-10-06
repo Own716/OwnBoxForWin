@@ -1,9 +1,13 @@
 import path from 'path';
 import fs from 'fs';
 import { ProxyNode, Subscription, RouteRule, AppRule, DnsConfig, AppSettings } from '../../types';
+import { CredentialSecurity } from '../security/CredentialSecurity';
 
 export class Database {
-  private static instance: Database;
+  public static readonly CURRENT_SCHEMA_VERSION = 2;
+  private static instance: Database | null = null;
+  private static customDir: string | null = null;
+
   private dataDir: string;
   private dbPath: string;
 
@@ -15,9 +19,17 @@ export class Database {
   private dns: DnsConfig;
   private settings: AppSettings;
 
-  private constructor() {
-    const appData = process.env.APPDATA || path.join(process.env.USERPROFILE || 'C:\\', 'AppData', 'Roaming');
-    this.dataDir = path.join(appData, 'OwnBox');
+  private saveTimer: NodeJS.Timeout | null = null;
+  private isDirty = false;
+
+  private constructor(customDir?: string) {
+    if (customDir) {
+      this.dataDir = customDir;
+    } else {
+      const appData = process.env.APPDATA || path.join(process.env.USERPROFILE || 'C:\\', 'AppData', 'Roaming');
+      this.dataDir = path.join(appData, 'OwnBox');
+    }
+
     if (!fs.existsSync(this.dataDir)) {
       fs.mkdirSync(this.dataDir, { recursive: true });
     }
@@ -51,6 +63,7 @@ export class Database {
       inboundAuth: false,
       systemProxyEnabled: true,
       systemProxyBypassLan: true,
+      customBypassList: '',
 
       tunEnabled: false,
       tunMtu: 9000,
@@ -61,6 +74,9 @@ export class Database {
       tunIPv6: false,
       tunEndpointIndependentNat: true,
 
+      dnsCache: true,
+      dnsOptimistic: true,
+
       routingMode: 'rule',
       logLevel: 'info',
       clashApiEnabled: true,
@@ -68,7 +84,7 @@ export class Database {
 
       testUrl: 'http://cp.cloudflare.com/generate_204',
       testTimeoutMs: 5000,
-      testConcurrent: 8,
+      testConcurrent: 10,
 
       webdav: {
         serverUrl: '',
@@ -120,23 +136,44 @@ export class Database {
       { id: 'app-steam', name: 'Steam Client', exePath: 'steam.exe', action: 'direct', enabled: true },
     ];
 
-    // Initialize empty node list (no fake mock nodes)
     this.nodes = [];
     this.activeNodeId = '';
 
     this.load();
   }
 
-  public static getInstance(): Database {
+  public static getInstance(customDir?: string): Database {
+    if (customDir && customDir !== Database.customDir) {
+      Database.customDir = customDir;
+      Database.instance = new Database(customDir);
+      return Database.instance;
+    }
     if (!Database.instance) {
-      Database.instance = new Database();
+      Database.instance = new Database(Database.customDir || undefined);
     }
     return Database.instance;
+  }
+
+  public static resetInstance(): void {
+    if (Database.instance && Database.instance.saveTimer) {
+      clearTimeout(Database.instance.saveTimer);
+      Database.instance.saveTimer = null;
+    }
+    Database.instance = null;
+    Database.customDir = null;
   }
 
   private load(): void {
     try {
       if (fs.existsSync(this.dbPath)) {
+        // Guard against zero-byte corrupted files
+        const stat = fs.statSync(this.dbPath);
+        if (stat.size === 0) {
+          console.warn('Database file is 0 bytes, recovering from backup...');
+          this.recoverFromBackup();
+          return;
+        }
+
         let raw = '';
         try {
           raw = fs.readFileSync(this.dbPath, 'utf8');
@@ -148,30 +185,56 @@ export class Database {
 
         try {
           const data = JSON.parse(raw);
-          if (data.nodes) {
-            this.nodes = (data.nodes as ProxyNode[]).filter((n) => !n.server || !n.server.includes('ownbox.org'));
+          this.applyData(data);
+
+          // Auto-migrate schema if version is older
+          if (!data.schemaVersion || data.schemaVersion < Database.CURRENT_SCHEMA_VERSION) {
+            console.log(`Migrating database from version ${data.schemaVersion || 1} to ${Database.CURRENT_SCHEMA_VERSION}`);
+            this.flush();
           }
-          if (data.subscriptions) this.subscriptions = data.subscriptions;
-          if (data.rules) this.rules = data.rules;
-          if (data.appRules) this.appRules = data.appRules;
-          if (data.dns) this.dns = { ...this.dns, ...data.dns };
-          if (data.settings) this.settings = { ...this.settings, ...data.settings };
-          if (data.activeNodeId) this.activeNodeId = data.activeNodeId;
         } catch (jsonErr: any) {
-          console.error('Database JSON parse error, attempting recovery:', jsonErr);
-          // 1. Backup corrupted file
+          console.error('Database JSON parse error, isolating corrupt file:', jsonErr);
           const corruptPath = `${this.dbPath}.corrupted.${Date.now()}`;
           try {
             fs.copyFileSync(this.dbPath, corruptPath);
           } catch {}
-          // 2. Try loading from .bak
           this.recoverFromBackup();
         }
       } else {
-        this.save();
+        this.flush();
       }
     } catch (e) {
       console.error('Failed to load database:', e);
+    }
+  }
+
+  private applyData(data: any): void {
+    if (Array.isArray(data.nodes)) {
+      this.nodes = (data.nodes as ProxyNode[]).filter(
+        (n) => n && n.id && (!n.server || !n.server.includes('ownbox.org'))
+      );
+    }
+    if (Array.isArray(data.subscriptions)) {
+      this.subscriptions = data.subscriptions.filter((s: any) => s && s.id);
+    }
+    if (Array.isArray(data.rules)) {
+      this.rules = data.rules.filter((r: any) => r && r.id);
+    }
+    if (Array.isArray(data.appRules)) {
+      this.appRules = data.appRules.filter((a: any) => a && a.id);
+    }
+    if (data.dns && typeof data.dns === 'object') {
+      this.dns = { ...this.dns, ...data.dns };
+    }
+    if (data.settings && typeof data.settings === 'object') {
+      this.settings = { ...this.settings, ...data.settings };
+      // Decrypt sensitive credentials in memory
+      if (this.settings.webdav && this.settings.webdav.password) {
+        this.settings.webdav.password = CredentialSecurity.decrypt(this.settings.webdav.password);
+      }
+    }
+    if (data.activeNodeId && typeof data.activeNodeId === 'string') {
+      this.activeNodeId = data.activeNodeId;
     }
   }
 
@@ -181,48 +244,90 @@ export class Database {
       try {
         const raw = fs.readFileSync(bakPath, 'utf8');
         const data = JSON.parse(raw);
-        if (data.nodes) this.nodes = data.nodes;
-        if (data.subscriptions) this.subscriptions = data.subscriptions;
-        if (data.rules) this.rules = data.rules;
-        if (data.appRules) this.appRules = data.appRules;
-        if (data.dns) this.dns = { ...this.dns, ...data.dns };
-        if (data.settings) this.settings = { ...this.settings, ...data.settings };
-        if (data.activeNodeId) this.activeNodeId = data.activeNodeId;
-        // Save back restored state
-        this.save();
+        this.applyData(data);
+        console.log('Successfully recovered database from .bak backup');
+        this.flush();
         return;
-      } catch {}
+      } catch (e) {
+        console.error('Failed to recover from .bak backup:', e);
+      }
     }
-    this.save();
+    // If no backup exists or backup corrupted, initialize with default empty state
+    this.flush();
   }
 
-  public save(): void {
+  /**
+   * Saves database state. If debounceMs > 0, coalesces multiple writes to prevent disk I/O thrashing.
+   */
+  public save(debounceMs = 0): void {
+    if (debounceMs > 0) {
+      this.isDirty = true;
+      if (this.saveTimer) {
+        clearTimeout(this.saveTimer);
+      }
+      this.saveTimer = setTimeout(() => {
+        this.saveTimer = null;
+        this.flush();
+      }, debounceMs);
+    } else {
+      this.flush();
+    }
+  }
+
+  /**
+   * High-frequency debounced save (default 300ms window).
+   */
+  public saveDebounced(debounceMs = 300): void {
+    this.save(debounceMs);
+  }
+
+  /**
+   * Immediately flushes any pending changes to disk atomically.
+   */
+  public flush(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+
     const tempPath = `${this.dbPath}.tmp`;
     const bakPath = `${this.dbPath}.bak`;
     try {
+      // Encrypt sensitive fields on disk
+      const diskSettings: AppSettings = {
+        ...this.settings,
+        webdav: {
+          ...this.settings.webdav,
+          password: CredentialSecurity.encrypt(this.settings.webdav.password || ''),
+        },
+      };
+
       const data = {
+        schemaVersion: Database.CURRENT_SCHEMA_VERSION,
         activeNodeId: this.activeNodeId,
         nodes: this.nodes,
         subscriptions: this.subscriptions,
         rules: this.rules,
         appRules: this.appRules,
         dns: this.dns,
-        settings: this.settings,
+        settings: diskSettings,
       };
+
       const jsonStr = JSON.stringify(data, null, 2);
 
       // 1. Atomic write to temporary file
       fs.writeFileSync(tempPath, jsonStr, 'utf8');
 
-      // 2. Create/update backup file
+      // 2. Create/update backup file from currently working dbPath
       if (fs.existsSync(this.dbPath)) {
         try {
           fs.copyFileSync(this.dbPath, bakPath);
         } catch {}
       }
 
-      // 3. Rename temp file to target file (atomic in Windows NTFS)
+      // 3. Rename temp file to target file
       fs.renameSync(tempPath, this.dbPath);
+      this.isDirty = false;
     } catch (e) {
       console.error('Failed to save database atomically:', e);
       try {

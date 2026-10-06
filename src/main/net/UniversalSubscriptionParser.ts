@@ -100,6 +100,12 @@ export class UniversalSubscriptionParser {
           node = this.parseShadowsocks(line);
         } else if (line.startsWith('hy2://') || line.startsWith('hysteria2://')) {
           node = this.parseHysteria2(line);
+        } else if (line.startsWith('hysteria://')) {
+          node = this.parseHysteria1(line);
+        } else if (line.startsWith('socks5://') || line.startsWith('socks://')) {
+          node = this.parseSocks(line);
+        } else if (line.startsWith('http://') || line.startsWith('https://')) {
+          node = this.parseHttp(line);
         } else if (line.startsWith('tuic://')) {
           node = this.parseTuic(line);
         } else if (line.startsWith('wireguard://')) {
@@ -290,7 +296,7 @@ export class UniversalSubscriptionParser {
         node.sni = p.sni || p.servername;
         node.transport = p.network === 'ws' ? 'ws' : (p.network === 'grpc' ? 'grpc' : 'tcp');
         node.transportPath = p['ws-opts']?.path;
-      } else if (type === 'hysteria2' || type === 'hysteria') {
+      } else if (type === 'hysteria2') {
         node.type = 'hysteria2';
         node.password = p.password || p.auth;
         node.tls = true;
@@ -298,6 +304,27 @@ export class UniversalSubscriptionParser {
         node.obfs = p['obfs-password'] || p.obfs;
         node.upMbps = p.up ? Number(p.up) : undefined;
         node.downMbps = p.down ? Number(p.down) : undefined;
+      } else if (type === 'hysteria') {
+        node.type = 'hysteria';
+        node.authStr = p['auth-str'] || p.auth_str || p.auth || p.password;
+        node.protocol = p.protocol;
+        node.tls = true;
+        node.sni = p.sni;
+        node.upMbps = p.up ? Number(p.up) : undefined;
+        node.downMbps = p.down ? Number(p.down) : undefined;
+        node.alpn = p.alpn ? (Array.isArray(p.alpn) ? p.alpn : [p.alpn]) : undefined;
+      } else if (type === 'socks5' || type === 'socks') {
+        node.type = 'socks';
+        node.username = p.username || p.user;
+        node.uuid = node.username;
+        node.password = p.password || p.pass;
+      } else if (type === 'http' || type === 'https') {
+        node.type = 'http';
+        node.tls = type === 'https' || !!p.tls;
+        node.username = p.username || p.user;
+        node.uuid = node.username;
+        node.password = p.password || p.pass;
+        node.sni = p.sni;
       } else if (type === 'tuic') {
         node.type = 'tuic';
         node.uuid = p.uuid;
@@ -521,4 +548,104 @@ export class UniversalSubscriptionParser {
       mtu: Number(search.get('mtu')) || 1420,
     };
   }
+
+  public static parseHysteria1(uri: string): ProxyNode | null {
+    const cleanUri = uri.replace(/^hysteria:\/\//, 'https://');
+    const url = new URL(cleanUri);
+    const rawTag = url.hash.replace(/^#/, '');
+    const name = this.safeDecodeUri(rawTag) || url.hostname;
+    const search = url.searchParams;
+
+    const auth = search.get('auth') || search.get('auth_str') || search.get('authStr') || url.username || undefined;
+    const protocol = search.get('protocol') || undefined;
+    const up = search.get('upmbps') || search.get('up_mbps') || search.get('up') || undefined;
+    const down = search.get('downmbps') || search.get('down_mbps') || search.get('down') || undefined;
+    const peer = search.get('peer') || search.get('sni') || url.hostname;
+    const insecure = search.get('insecure') === '1' || search.get('insecure') === 'true';
+    const alpn = search.get('alpn') ? search.get('alpn')!.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+    const obfs = search.get('obfs') || undefined;
+
+    return {
+      id: Math.random().toString(36).substring(2),
+      name,
+      type: 'hysteria',
+      server: url.hostname.replace(/^\[|\]$/g, ''),
+      port: Number(url.port) || 443,
+      groupId: 'default',
+      authStr: auth,
+      protocol,
+      upMbps: up ? Number(up) : undefined,
+      downMbps: down ? Number(down) : undefined,
+      tls: true,
+      sni: peer,
+      insecure,
+      alpn,
+      obfs,
+    };
+  }
+
+  public static parseSocks(uri: string): ProxyNode | null {
+    const cleanUri = uri.replace(/^socks5:\/\//, 'http://').replace(/^socks:\/\//, 'http://');
+    const url = new URL(cleanUri);
+    const rawTag = url.hash.replace(/^#/, '');
+    const name = this.safeDecodeUri(rawTag) || url.hostname;
+
+    let username = url.username;
+    let password = url.password;
+
+    if (username && !password && !username.includes(':')) {
+      const decoded = this.safeBase64Decode(username);
+      if (decoded.includes(':')) {
+        const parts = decoded.split(':');
+        username = parts[0];
+        password = parts.slice(1).join(':');
+      }
+    }
+
+    return {
+      id: Math.random().toString(36).substring(2),
+      name,
+      type: 'socks',
+      server: url.hostname.replace(/^\[|\]$/g, ''),
+      port: Number(url.port) || 1080,
+      groupId: 'default',
+      username: username || undefined,
+      uuid: username || undefined,
+      password: password || undefined,
+    };
+  }
+
+  public static parseHttp(uri: string): ProxyNode | null {
+    const isHttps = uri.startsWith('https://');
+    const url = new URL(uri);
+    const rawTag = url.hash.replace(/^#/, '');
+    const name = this.safeDecodeUri(rawTag) || url.hostname;
+
+    let username = url.username;
+    let password = url.password;
+
+    if (username && !password && !username.includes(':')) {
+      const decoded = this.safeBase64Decode(username);
+      if (decoded.includes(':')) {
+        const parts = decoded.split(':');
+        username = parts[0];
+        password = parts.slice(1).join(':');
+      }
+    }
+
+    return {
+      id: Math.random().toString(36).substring(2),
+      name,
+      type: 'http',
+      server: url.hostname.replace(/^\[|\]$/g, ''),
+      port: Number(url.port) || (isHttps ? 443 : 8080),
+      groupId: 'default',
+      username: username || undefined,
+      uuid: username || undefined,
+      password: password || undefined,
+      tls: isHttps,
+      sni: isHttps ? (url.searchParams.get('sni') || url.hostname) : undefined,
+    };
+  }
 }
+

@@ -86,15 +86,15 @@ export const Nodes: React.FC<NodesProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('all'); // subscription group
   const [selectedRegion, setSelectedRegion] = useState('all'); // country / region
-  const [sortBy, setSortByState] = useState<'default' | 'ping-asc' | 'ping-desc' | 'name-asc' | 'type' | 'starred'>(() => {
+  const [sortBy, setSortByState] = useState<'default' | 'ping-asc' | 'ping-desc' | 'name-asc' | 'type' | 'starred' | 'speed-desc'>(() => {
     const saved = localStorage.getItem('ownbox_node_sort_by');
-    if (saved && ['default', 'ping-asc', 'ping-desc', 'name-asc', 'type', 'starred'].includes(saved)) {
+    if (saved && ['default', 'ping-asc', 'ping-desc', 'name-asc', 'type', 'starred', 'speed-desc'].includes(saved)) {
       return saved as any;
     }
     return 'default';
   });
 
-  const setSortBy = (val: 'default' | 'ping-asc' | 'ping-desc' | 'name-asc' | 'type' | 'starred') => {
+  const setSortBy = (val: 'default' | 'ping-asc' | 'ping-desc' | 'name-asc' | 'type' | 'starred' | 'speed-desc') => {
     setSortByState(val);
     try {
       localStorage.setItem('ownbox_node_sort_by', val);
@@ -109,6 +109,7 @@ export const Nodes: React.FC<NodesProps> = ({
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState('');
   const [isPinging, setIsPinging] = useState(false);
+  const [pingingNodeIds, setPingingNodeIds] = useState<Set<string>>(new Set());
   const [copiedNodeId, setCopiedNodeId] = useState<string | null>(null);
   const [speedTestingNode, setSpeedTestingNode] = useState<ProxyNode | null>(null);
 
@@ -212,6 +213,11 @@ export const Nodes: React.FC<NodesProps> = ({
           const starB = b.starred ? 1 : 0;
           return starB - starA;
         }
+        if (sortBy === 'speed-desc') {
+          const speedA = a.downloadSpeed && a.downloadSpeed > 0 ? a.downloadSpeed : -1;
+          const speedB = b.downloadSpeed && b.downloadSpeed > 0 ? b.downloadSpeed : -1;
+          return speedB - speedA;
+        }
         return 0;
       });
 
@@ -219,9 +225,21 @@ export const Nodes: React.FC<NodesProps> = ({
   const handlePingNode = async (node: ProxyNode, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!window.electronAPI) return;
-    const res = await window.electronAPI.nodes.ping(node.server, node.port);
-    const updated = nodes.map((n) => (n.id === node.id ? { ...n, ping: res.time } : n));
-    onSaveNodes(updated);
+    setPingingNodeIds((prev) => new Set(prev).add(node.id));
+    try {
+      const res = await window.electronAPI.nodes.ping(node.server, node.port);
+      const updated = nodes.map((n) => (n.id === node.id ? { ...n, ping: res.time, lastTested: Date.now() } : n));
+      onSaveNodes(updated);
+    } catch {
+      const updated = nodes.map((n) => (n.id === node.id ? { ...n, ping: -1, lastTested: Date.now() } : n));
+      onSaveNodes(updated);
+    } finally {
+      setPingingNodeIds((prev) => {
+        const next = new Set(prev);
+        next.delete(node.id);
+        return next;
+      });
+    }
   };
 
   const handleBatchPing = async () => {
@@ -323,6 +341,7 @@ export const Nodes: React.FC<NodesProps> = ({
     'name-asc': '以名称 (A-Z)',
     'type': '以协议排序',
     'starred': '以收藏优先',
+    'speed-desc': '以下载速度 (快到慢)',
   };
 
   return (
@@ -368,6 +387,7 @@ export const Nodes: React.FC<NodesProps> = ({
                   { id: 'name-asc', label: '以名称排序 (A - Z)' },
                   { id: 'type', label: '以协议类型排序' },
                   { id: 'starred', label: '以星标收藏置顶' },
+                  { id: 'speed-desc', label: '以下载速度排序 (快到慢)' },
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -547,26 +567,61 @@ export const Nodes: React.FC<NodesProps> = ({
                   <div className="flex items-center space-x-2">
                     {/* Ping button / badge */}
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSpeedTestingNode(node);
-                      }}
+                      onClick={(e) => handlePingNode(node, e)}
+                      disabled={pingingNodeIds.has(node.id)}
                       className={`text-[10px] font-medium px-2 py-0.5 rounded-full flex items-center space-x-1 transition-colors ${
-                        hasPing
-                          ? node.ping! < 250
+                        pingingNodeIds.has(node.id)
+                          ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30'
+                          : hasPing
+                          ? node.ping! < 100
                             ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-semibold'
-                            : node.ping! < 450
+                            : node.ping! <= 250
                             ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-medium'
                             : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-semibold'
                           : isTimeout
-                          ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-semibold'
+                          ? 'bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/25 font-medium'
                           : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                       }`}
-                      title="点击进行单节点专项测速"
+                      title="点击快速测试 TCP Ping 延迟"
                     >
-                      <Zap className="w-2.5 h-2.5" />
-                      <span>{hasPing ? `${node.ping} ms` : isTimeout ? '超时' : '测速'}</span>
+                      {pingingNodeIds.has(node.id) ? (
+                        <>
+                          <RotateCcw className="w-2.5 h-2.5 animate-spin" />
+                          <span>测速中</span>
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-2.5 h-2.5" />
+                          <span>{hasPing ? `${node.ping} ms` : isTimeout ? '超时' : '测速'}</span>
+                        </>
+                      )}
                     </button>
+
+                    {/* Download Bandwidth Badge (if tested) */}
+                    {node.downloadSpeed !== undefined && node.downloadSpeed > 0 && (
+                      <span
+                        className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center space-x-1"
+                        title="下载带宽吞吐"
+                      >
+                        <Download className="w-2.5 h-2.5" />
+                        <span>
+                          {node.downloadSpeed >= 8000000
+                            ? `${(node.downloadSpeed / 8000000).toFixed(1)} MB/s`
+                            : `${(node.downloadSpeed / 1000000).toFixed(1)} Mbps`}
+                        </span>
+                      </span>
+                    )}
+
+                    {/* HTTP Latency Badge (if tested) */}
+                    {node.httpLatency !== undefined && node.httpLatency > 0 && (
+                      <span
+                        className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 flex items-center space-x-1"
+                        title="HTTP 真实响应时延"
+                      >
+                        <span className="text-[9px] opacity-70">HTTP</span>
+                        <span>{node.httpLatency} ms</span>
+                      </span>
+                    )}
 
                     {isSelected && (
                       <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold flex items-center space-x-0.5">
@@ -713,8 +768,18 @@ export const Nodes: React.FC<NodesProps> = ({
           node={speedTestingNode}
           isActive={speedTestingNode.id === activeNodeId}
           onSelectNode={onSelectNode}
-          onSaveNodePing={(nodeId, ping) => {
-            const updated = nodes.map((n) => (n.id === nodeId ? { ...n, ping } : n));
+          onSaveNodePing={(nodeId, ping, httpLatency, downloadSpeed) => {
+            const updated = nodes.map((n) =>
+              n.id === nodeId
+                ? {
+                    ...n,
+                    ping,
+                    httpLatency: httpLatency !== undefined ? httpLatency : n.httpLatency,
+                    downloadSpeed: downloadSpeed !== undefined ? downloadSpeed : n.downloadSpeed,
+                    lastTested: Date.now(),
+                  }
+                : n
+            );
             onSaveNodes(updated);
           }}
           onClose={() => setSpeedTestingNode(null)}

@@ -24,6 +24,12 @@ export class ConfigGenerator {
         listen: settings.allowLan ? '0.0.0.0' : '127.0.0.1',
         listen_port: settings.mixedPort || 2080,
       },
+      {
+        type: 'mixed',
+        tag: 'speedtest-in',
+        listen: '127.0.0.1',
+        listen_port: (settings.mixedPort || 2080) + 1,
+      },
     ];
 
     if (settings.inboundAuth && settings.inboundUser && settings.inboundPass) {
@@ -76,13 +82,24 @@ export class ConfigGenerator {
       }
     }
 
-    // Proxy selector
-    const mainProxyTag = activeNode ? `node-${activeNode.id}` : (nodeTags[0] || 'direct');
+    // 1) Main proxy selector (user live traffic)
+    const validMainTag = (activeNode && nodeTags.includes(`node-${activeNode.id}`))
+      ? `node-${activeNode.id}`
+      : (nodeTags[0] || 'direct');
+
     outbounds.unshift({
       type: 'selector',
       tag: 'proxy',
       outbounds: nodeTags.length > 0 ? nodeTags : ['direct'],
-      default: mainProxyTag,
+      default: validMainTag,
+    });
+
+    // 2) Dedicated speedtest selector (isolated for speed testing, never touches 'proxy')
+    outbounds.push({
+      type: 'selector',
+      tag: 'speedtest-selector',
+      outbounds: ['direct', ...nodeTags],
+      default: 'direct',
     });
 
     // 3. DNS Configuration (Sing-box 1.14 / 1.15 compliant)
@@ -95,6 +112,14 @@ export class ConfigGenerator {
         type: 'local',
       },
     ];
+
+    if (dns.servers && Array.isArray(dns.servers)) {
+      for (const s of dns.servers) {
+        if (!s || !s.tag || !s.address) continue;
+        if (['remote-dns', 'direct-dns', 'dns-local', 'fakeip-dns'].includes(s.tag)) continue;
+        dnsServers.push(this.parseDnsServer(s.tag, s.address, s.detour));
+      }
+    }
 
     if (dns.mode === 'fakeip') {
       dnsServers.unshift({
@@ -154,6 +179,10 @@ export class ConfigGenerator {
       reverse_mapping: true,
     };
 
+    if (settings.dnsCache !== false) {
+      dnsConfig.cache_capacity = 4096;
+    }
+
     // 4. HTTP Clients for remote rule sets (Mandatory in Sing-box 1.14 / 1.15)
     // Note: Do not set detour: 'direct' here to avoid empty direct outbound error
     const http_clients = [
@@ -195,6 +224,10 @@ export class ConfigGenerator {
     ];
 
     const routeRules: any[] = [
+      {
+        inbound: ['speedtest-in'],
+        outbound: 'speedtest-selector',
+      },
       {
         action: 'sniff',
       },
@@ -238,16 +271,15 @@ export class ConfigGenerator {
 
       let procName = '';
       if (app.exePath) {
-        procName = path.basename(app.exePath);
+        const clean = app.exePath.trim().replace(/^["']|["']$/g, '');
+        procName = path.basename(clean);
       } else if (app.name) {
-        procName = app.name.endsWith('.exe') ? app.name : `${app.name}.exe`;
+        const cleanName = app.name.trim();
+        procName = cleanName.endsWith('.exe') ? cleanName : `${cleanName}.exe`;
       }
 
       if (procName) {
         ruleItem.process_name = [procName];
-      }
-      if (app.exePath && (app.exePath.includes('\\') || app.exePath.includes('/'))) {
-        ruleItem.process_path = [app.exePath];
       }
       routeRules.push(ruleItem);
     }
@@ -517,6 +549,51 @@ export class ConfigGenerator {
     return server;
   }
 
+  private static buildTransport(node: ProxyNode): any | undefined {
+    if (!node.transport || node.transport === 'tcp') return undefined;
+
+    if (node.transport === 'xhttp') {
+      const transport: any = {
+        type: 'httpupgrade',
+      };
+      if (node.transportPath) transport.path = node.transportPath;
+      if (node.transportHost) transport.host = node.transportHost;
+      if (node.xhttpExtraHeaders) transport.headers = node.xhttpExtraHeaders;
+      return transport;
+    }
+
+    if (node.transport === 'ws') {
+      const transport: any = {
+        type: 'ws',
+        path: node.transportPath || '/',
+      };
+      if (node.transportHost) {
+        transport.headers = { Host: node.transportHost };
+      }
+      return transport;
+    }
+
+    if (node.transport === 'grpc') {
+      return {
+        type: 'grpc',
+        service_name: node.transportHost || node.transportPath || 'GunService',
+      };
+    }
+
+    if (node.transport === 'http') {
+      const transport: any = {
+        type: 'http',
+        path: node.transportPath || '/',
+      };
+      if (node.transportHost) {
+        transport.host = [node.transportHost];
+      }
+      return transport;
+    }
+
+    return undefined;
+  }
+
   private static buildNodeOutbound(node: ProxyNode): any | null {
     if (node.rawOutbound) {
       return {
@@ -563,19 +640,8 @@ export class ConfigGenerator {
           }
         }
 
-        if (node.transport && node.transport !== 'tcp') {
-          outbound.transport = {
-            type: node.transport,
-          };
-          if (node.transportPath) outbound.transport.path = node.transportPath;
-          if (node.transportHost) {
-            if (node.transport === 'ws') {
-              outbound.transport.headers = { Host: node.transportHost };
-            } else if (node.transport === 'grpc') {
-              outbound.transport.service_name = node.transportHost;
-            }
-          }
-        }
+        const transport = this.buildTransport(node);
+        if (transport) outbound.transport = transport;
 
         return outbound;
       }
@@ -599,12 +665,8 @@ export class ConfigGenerator {
           };
         }
 
-        if (node.transport && node.transport !== 'tcp') {
-          outbound.transport = {
-            type: node.transport,
-          };
-          if (node.transportPath) outbound.transport.path = node.transportPath;
-        }
+        const transport = this.buildTransport(node);
+        if (transport) outbound.transport = transport;
 
         return outbound;
       }
@@ -623,6 +685,8 @@ export class ConfigGenerator {
           },
         };
         if (node.alpn) outbound.tls.alpn = node.alpn;
+        const transport = this.buildTransport(node);
+        if (transport) outbound.transport = transport;
         return outbound;
       }
 
@@ -638,7 +702,34 @@ export class ConfigGenerator {
         };
       }
 
-      case 'hysteria':
+      case 'shadowsocksr':
+      case 'snell': {
+        // Sing-box native core does not support ShadowsocksR or Snell outbound natively
+        console.warn(`[ConfigGenerator] Node "${node.name}" (${node.type}) is not supported by native sing-box core, omitted safely.`);
+        return null;
+      }
+
+      case 'hysteria': {
+        const outbound: any = {
+          type: 'hysteria',
+          tag,
+          server: node.server,
+          server_port: node.port,
+          auth_str: node.authStr || node.password || '',
+          up_mbps: node.upMbps || 100,
+          down_mbps: node.downMbps || 100,
+          tls: {
+            enabled: true,
+            server_name: node.sni || node.server,
+            insecure: node.insecure || false,
+            alpn: node.alpn && node.alpn.length > 0 ? node.alpn : ['hysteria'],
+          },
+        };
+        if (node.protocol) outbound.protocol = node.protocol;
+        if (node.obfs) outbound.obfs = node.obfs;
+        return outbound;
+      }
+
       case 'hysteria2': {
         const outbound: any = {
           type: 'hysteria2',
@@ -652,6 +743,7 @@ export class ConfigGenerator {
             insecure: node.insecure || false,
           },
         };
+        if (node.alpn && node.alpn.length > 0) outbound.tls.alpn = node.alpn;
         if (node.upMbps) outbound.up_mbps = node.upMbps;
         if (node.downMbps) outbound.down_mbps = node.downMbps;
         if (node.obfs) {
@@ -705,8 +797,8 @@ export class ConfigGenerator {
           server_port: node.port,
           version: '5',
         };
-        if (node.uuid || node.password) {
-          outbound.username = node.uuid || '';
+        if (node.username || node.uuid || node.password) {
+          outbound.username = node.username || node.uuid || '';
           outbound.password = node.password || '';
         }
         return outbound;
@@ -719,8 +811,8 @@ export class ConfigGenerator {
           server: node.server,
           server_port: node.port,
         };
-        if (node.uuid || node.password) {
-          outbound.username = node.uuid || '';
+        if (node.username || node.uuid || node.password) {
+          outbound.username = node.username || node.uuid || '';
           outbound.password = node.password || '';
         }
         return outbound;

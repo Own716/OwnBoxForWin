@@ -133,18 +133,8 @@ export class TrayManager {
           type: 'radio',
           checked: n.id === activeNodeId,
           click: async () => {
-            db.setActiveNodeId(n.id);
-            if (core.getState() === 'running') {
-              const config = ConfigGenerator.generate(
-                n.id,
-                nodes,
-                db.getRules(),
-                db.getAppRules(),
-                db.getDns(),
-                settings
-              );
-              await core.start(config);
-            }
+            const { ProxySelectionService } = await import('../core/ProxySelectionService');
+            await ProxySelectionService.selectNode(n.id);
             this.updateMenu();
             this.mainWindow?.webContents.send('node:changed', n.id);
           },

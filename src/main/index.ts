@@ -8,11 +8,12 @@ import { promisify } from 'util';
 import { Database } from './db/Database';
 import { SingBoxManager } from './core/SingBoxManager';
 import { ConfigGenerator } from './core/ConfigGenerator';
+import { ProxySelectionService } from './core/ProxySelectionService';
 import { SystemProxy } from './system/SystemProxy';
 import { ProcessScanner } from './system/ProcessScanner';
 import { TcpPing } from './net/TcpPing';
 import { SpeedTestRunner } from './net/SpeedTestRunner';
-import { WebDAVClient } from './net/WebDAVClient';
+import { WebDAVSyncService } from './net/WebDAVSyncService';
 import { BackupMigrator } from './db/BackupMigrator';
 import { BackupService } from './db/backup/BackupService';
 import { SubscriptionFetcher } from './net/SubscriptionFetcher';
@@ -175,9 +176,11 @@ app.whenReady().then(() => {
     }
   }, 1000);
 
-  // Auto connect on launch
+  // Check and clean residual system proxy if core is not active
   const settings = Database.getInstance().getSettings();
-  if (settings.autoConnectOnLaunch) {
+  if (!settings.autoConnectOnLaunch) {
+    SystemProxy.checkAndCleanResidual(settings.mixedPort || 2080);
+  } else {
     handleCoreStart();
   }
 });
@@ -191,6 +194,7 @@ app.on('before-quit', async (e) => {
       trafficTimer = null;
     }
     try {
+      Database.getInstance().flush();
       await handleCoreStop();
       await SystemProxy.restoreOriginal();
       await LogManager.getInstance().destroy();
@@ -340,14 +344,22 @@ ipcMain.handle('system:relaunchAsAdmin', () => {
   return true;
 });
 ipcMain.handle('system:flushDns', async () => {
-  try {
-    await promisify(exec)('ipconfig /flushdns');
-    LogManager.getInstance().addLog('info', 'Windows 本地 DNS 缓存已成功刷新 (ipconfig /flushdns)', 'system');
-    return { success: true, message: 'Windows 本地 DNS 缓存已成功刷新！' };
-  } catch (e: any) {
-    LogManager.getInstance().addLog('warn', `刷新 DNS 缓存失败: ${e.message}`, 'system');
-    return { success: false, message: e.message };
-  }
+  return new Promise((resolve) => {
+    const cp = spawn('ipconfig.exe', ['/flushdns'], { windowsHide: true });
+    cp.on('close', (code) => {
+      if (code === 0) {
+        LogManager.getInstance().addLog('info', 'Windows 本地 DNS 缓存已成功刷新 (ipconfig /flushdns)', 'system');
+        resolve({ success: true, message: 'Windows 本地 DNS 缓存已成功刷新！' });
+      } else {
+        LogManager.getInstance().addLog('warn', `刷新 DNS 缓存返回代码: ${code}`, 'system');
+        resolve({ success: false, message: `刷新失败，退出代码: ${code}` });
+      }
+    });
+    cp.on('error', (err) => {
+      LogManager.getInstance().addLog('warn', `刷新 DNS 缓存失败: ${err.message}`, 'system');
+      resolve({ success: false, message: err.message });
+    });
+  });
 });
 ipcMain.handle('system:getAppVersion', () => app.getVersion());
 
@@ -384,14 +396,9 @@ ipcMain.handle('nodes:getAll', () => Database.getInstance().getNodes());
 ipcMain.handle('nodes:save', (_, nodes) => Database.getInstance().saveNodes(nodes));
 ipcMain.handle('nodes:getActiveId', () => Database.getInstance().getActiveNodeId());
 ipcMain.handle('nodes:setActiveId', async (_, id) => {
-  const db = Database.getInstance();
-  db.setActiveNodeId(id);
-  const core = SingBoxManager.getInstance();
-  if (core.getState() === 'running') {
-    await handleCoreStart();
-  }
-  TrayManager.getInstance().updateMenu();
-  return true;
+  const res = await ProxySelectionService.selectNode(id);
+  mainWindow?.webContents.send('node:changed', id);
+  return res.success;
 });
 ipcMain.handle('nodes:ping', (_, host, port) => TcpPing.ping(host, port));
 ipcMain.handle('nodes:batchPing', (_, list) => TcpPing.batchPing(list, 10));
@@ -481,7 +488,9 @@ ipcMain.handle('dns:testResolve', async (_, domain: string) => {
 
 // Speed Test
 ipcMain.handle('speedtest:latency', (_, url, nodeId) => {
-  const settings = Database.getInstance().getSettings();
+  const db = Database.getInstance();
+  const settings = db.getSettings();
+  const node = nodeId ? db.getNodes().find((n) => n.id === nodeId) : undefined;
   const testUrl = url || settings.testUrl || 'http://cp.cloudflare.com/generate_204';
   const timeoutMs = settings.testTimeoutMs || 5000;
   return SpeedTestRunner.testLatency(
@@ -489,7 +498,9 @@ ipcMain.handle('speedtest:latency', (_, url, nodeId) => {
     timeoutMs,
     settings.mixedPort,
     nodeId,
-    settings.clashApiPort || 9090
+    settings.clashApiPort || 9090,
+    node?.server,
+    node?.port
   );
 });
 ipcMain.handle('speedtest:download', (_, url, nodeId) => {
@@ -503,44 +514,25 @@ ipcMain.handle('speedtest:download', (_, url, nodeId) => {
     settings.clashApiPort || 9090
   );
 });
-ipcMain.handle('speedtest:cancel', () => SpeedTestRunner.cancel());
+ipcMain.handle('speedtest:cancel', (_, nodeId) => SpeedTestRunner.cancel(nodeId));
 
 // WebDAV
 ipcMain.handle('webdav:test', async (_, cfg) => {
-  const client = new WebDAVClient(cfg.serverUrl, cfg.username, cfg.password);
-  return client.testConnection();
+  return WebDAVSyncService.testConnection(cfg);
 });
 ipcMain.handle('webdav:backup', async () => {
-  const db = Database.getInstance();
-  const settings = db.getSettings();
-  const cfg = settings.webdav;
-  if (!cfg.serverUrl) throw new Error('WebDAV server not configured');
-
-  const client = new WebDAVClient(cfg.serverUrl, cfg.username, cfg.password);
-  await client.createDir(cfg.remotePath || 'OwnBox');
-
-  const content = await BackupService.exportWindowsBackup({ profiles: true, rules: true, settings: true });
-
-  const filename = `${cfg.remotePath || 'OwnBox'}/ownbox_backup_${Date.now()}.ownboxbackup`;
-  const latestFilename = `${cfg.remotePath || 'OwnBox'}/latest.ownboxbackup`;
-  const success = await client.upload(filename, content);
-  if (success) {
-    try {
-      await client.upload(latestFilename, content);
-    } catch {}
-    cfg.lastSyncTime = Date.now();
-    db.saveSettings({ webdav: cfg });
+  const res = await WebDAVSyncService.backup();
+  if (!res.success) {
+    throw new Error(res.message);
   }
-  return success;
+  return true;
 });
 ipcMain.handle('webdav:restore', async () => {
-  const db = Database.getInstance();
-  const cfg = db.getSettings().webdav;
-  if (!cfg.serverUrl) throw new Error('WebDAV server not configured');
-  const client = new WebDAVClient(cfg.serverUrl, cfg.username, cfg.password);
-  const content = await client.download(`${cfg.remotePath || 'OwnBox'}/latest.ownboxbackup`);
-  const result = await BackupService.importWithTransaction(content, { profiles: true, rules: true, settings: true });
-  return result.success;
+  const res = await WebDAVSyncService.restore();
+  if (!res.success) {
+    throw new Error(res.message);
+  }
+  return true;
 });
 
 // Backup

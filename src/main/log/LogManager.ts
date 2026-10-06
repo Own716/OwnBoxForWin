@@ -42,6 +42,7 @@ export class LogManager {
     this.flushTimer = setInterval(() => {
       this.flushQueueAsync();
     }, 100);
+    this.flushTimer.unref();
 
     // Initial system start event
     this.addLog('info', 'OwnBox 运行日志系统初始化完成', 'app');
@@ -136,12 +137,15 @@ export class LogManager {
       '.' +
       String(now.getMilliseconds()).padStart(3, '0');
 
+    const cleanMessage = (message || '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
+    if (!cleanMessage) return;
+
     const entry: LogEntry = {
       id: Math.random().toString(36).substring(2, 11),
       timestamp,
       timeFormatted,
       level,
-      message,
+      message: cleanMessage,
       source,
     };
 
@@ -152,7 +156,7 @@ export class LogManager {
     }
 
     // 2. Queue formatted line for asynchronous disk flush
-    const line = `[${timestamp}] [${source.toUpperCase()}] [${level.toUpperCase()}] ${message}\n`;
+    const line = `[${timestamp}] [${source.toUpperCase()}] [${level.toUpperCase()}] ${cleanMessage}\n`;
     this.writeQueue.push(line);
 
     // If queue is getting large, flush immediately
@@ -164,6 +168,7 @@ export class LogManager {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       try {
         this.mainWindow.webContents.send('core:log', entry);
+        this.mainWindow.webContents.send('log:added', entry);
       } catch {
         // Ignore dead webContents
       }

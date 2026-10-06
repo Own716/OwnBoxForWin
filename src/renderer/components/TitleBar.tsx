@@ -11,14 +11,14 @@ interface TitleBarProps {
 
 export const TitleBar: React.FC<TitleBarProps> = ({ theme, coreState, activeNodeName }) => {
   const [isMaximized, setIsMaximized] = useState(false);
-  const [appVersion, setAppVersion] = useState('v1.0.3 预览版');
+  const [appVersion, setAppVersion] = useState('v1.0.4 正式版');
 
   useEffect(() => {
     if (window.electronAPI) {
       window.electronAPI.window.isMaximized().then(setIsMaximized);
       if (window.electronAPI.system?.getAppVersion) {
         window.electronAPI.system.getAppVersion().then((ver) => {
-          if (ver) setAppVersion(`v${ver} 预览版`);
+          if (ver) setAppVersion(`v${ver} 正式版`);
         });
       }
     }
